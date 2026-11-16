@@ -22,6 +22,7 @@ import {
   boardThreadCounts,
   deriveBoardStage,
 } from "./boardStages";
+import { copyText, showAppContextMenu } from "./appContextMenu";
 import { useProjwallLatest, type ProjwallProject } from "./useProjwallLatest";
 import { useHostMetrics } from "./useHostMetrics";
 
@@ -174,6 +175,42 @@ export function BoardPage() {
     }).then((result) => {
       setStageError(result._tag === "Failure" ? "阶段保存失败：环境可能离线或无权限。" : null);
     });
+  };
+
+  const cardContextMenu = (card: CardModel) => async (event: React.MouseEvent) => {
+    const choice = await showAppContextMenu(event, [
+      { id: "open", label: "查看详情" },
+      ...(card.external ? [] : [{ id: "new-thread", label: "发起对话" }]),
+      { id: "copy", label: "复制路径" },
+      ...(card.projectId && card.environmentId
+        ? [
+            {
+              id: "stage",
+              label: "设置阶段",
+              separatorBefore: true,
+              children: [
+                ...BOARD_STAGES.map((entry) => ({
+                  id: `stage:${entry.id}`,
+                  label: entry.name,
+                  checked: card.stage === entry.id,
+                })),
+                ...(card.manualStage
+                  ? [{ id: "stage:auto", label: "恢复自动", separatorBefore: true }]
+                  : []),
+              ],
+            },
+          ]
+        : []),
+    ]);
+    if (choice === null) return;
+    if (choice === "open") selectCard(card.key);
+    else if (choice === "copy") void copyText(card.path);
+    else if (choice === "new-thread" && card.projectId && card.environmentId) {
+      void handleNewThread(scopeProjectRef(card.environmentId as never, card.projectId as never));
+    } else if (choice.startsWith("stage:") && card.projectId && card.environmentId) {
+      const stage = choice.slice("stage:".length);
+      setStage(card.projectId, card.environmentId, stage === "auto" ? null : (stage as BoardStage));
+    }
   };
 
   const threadsByProject = new Map<string, Array<(typeof threads)[number]>>();
@@ -656,6 +693,32 @@ export function BoardPage() {
           onPointerMove={handleBoardPanMove}
           onPointerUp={handleBoardPanEnd}
           onPointerLeave={handleBoardPanEnd}
+          onContextMenu={(event) => {
+            void showAppContextMenu(event, [
+              // 这段 JSX 只在看板分支渲染，所以「看板视图」恒为选中。
+              { id: "board", label: "看板视图", checked: true },
+              { id: "table", label: "表格视图", checked: false },
+              {
+                id: "new",
+                label: "新建项目",
+                separatorBefore: true,
+                disabled: writableEnvironment === null,
+              },
+              {
+                id: "adopt",
+                label: `全部接管（${externalCount}）`,
+                disabled:
+                  externalCount === 0 || adoptingAll !== null || writableEnvironment === null,
+              },
+            ]).then((choice) => {
+              if (choice === "board") setView("board");
+              else if (choice === "table") setView("table");
+              else if (choice === "new") setDialog({ stage: null });
+              else if (choice === "adopt") {
+                void adoptAll(cards.filter((card) => card.external).map((card) => card.path));
+              }
+            });
+          }}
         >
           {BOARD_STAGES.map((stage) => {
             const items = visible
@@ -752,6 +815,7 @@ export function BoardPage() {
                           dragging={dragging === card.key}
                           dragProps={cardDragProps(card)}
                           onSelect={() => selectCard(card.key)}
+                          onContextMenu={cardContextMenu(card)}
                         />
                       ))}
                       {sleepingShown
@@ -765,6 +829,7 @@ export function BoardPage() {
                               dragging={dragging === card.key}
                               dragProps={cardDragProps(card)}
                               onSelect={() => selectCard(card.key)}
+                              onContextMenu={cardContextMenu(card)}
                             />
                           ))
                         : null}
@@ -888,6 +953,7 @@ function BoardCard({
   dragging,
   dragProps,
   onSelect,
+  onContextMenu,
 }: {
   card: CardModel;
   now: number;
@@ -896,6 +962,7 @@ function BoardCard({
   dragging: boolean;
   dragProps: Record<string, unknown>;
   onSelect: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const slim = isSlim(card);
   const base = dragging ? "opacity-40 " : "";
@@ -909,6 +976,7 @@ function BoardCard({
       <div
         {...dragProps}
         onClick={onSelect}
+        onContextMenu={onContextMenu}
         className={`${base}${skin} ${selectedSkin} flex cursor-pointer items-center gap-1.5 px-2 py-1 ${flat ? "" : "rounded-md"}`}
       >
         <span className="min-w-0 flex-1 truncate text-2xs text-foreground/90">{card.title}</span>
@@ -929,6 +997,7 @@ function BoardCard({
     <div
       {...dragProps}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
       className={`${base}${skin} ${selectedSkin} relative cursor-pointer p-2 ${card.external && !flat ? "bg-card/50" : ""}`}
     >
       {card.counts.approval > 0 ? (

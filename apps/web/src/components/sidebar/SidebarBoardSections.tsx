@@ -6,6 +6,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import { copyText, showAppContextMenu } from "../board/appContextMenu";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useProjwallLatest } from "../board/useProjwallLatest";
 import { useHostMetrics, type RemoteHostSnapshot } from "../board/useHostMetrics";
@@ -115,6 +116,17 @@ export function SidebarBoardSections() {
                 <SidebarMenuButton
                   size="sm"
                   onClick={() => openBoard({ dir })}
+                  onContextMenu={(event) => {
+                    void showAppContextMenu(event, [
+                      { id: "filter", label: "按此目录过滤看板" },
+                      { id: "copy", label: "复制路径" },
+                      { id: "all", label: "打开全部项目", separatorBefore: true },
+                    ]).then((choice) => {
+                      if (choice === "filter") openBoard({ dir });
+                      else if (choice === "copy") void copyText(dir);
+                      else if (choice === "all") openBoard({});
+                    });
+                  }}
                   aria-label={`按目录 ${dir} 过滤项目板`}
                 >
                   <FolderIcon />
@@ -134,7 +146,20 @@ export function SidebarBoardSections() {
       <div className={sectionLabel}>机器</div>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="sm" onClick={() => openBoard({})} aria-label="打开项目板">
+          <SidebarMenuButton
+            size="sm"
+            onClick={() => openBoard({})}
+            onContextMenu={(event) => {
+              void showAppContextMenu(event, [
+                { id: "board", label: "打开项目板" },
+                { id: "copy", label: "复制本机名" },
+              ]).then((choice) => {
+                if (choice === "board") openBoard({});
+                else if (choice === "copy") void copyText(shortHost(hostMetrics?.host ?? "本机"));
+              });
+            }}
+            aria-label="打开项目板"
+          >
             <span className="size-1.5 flex-none rounded-full bg-success" />
             <span className="truncate">本机</span>
             <span className="ml-auto text-2xs tabular-nums text-sidebar-muted-foreground">
