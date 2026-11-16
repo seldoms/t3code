@@ -86,6 +86,8 @@ interface CardModel {
   readonly external: boolean;
   /** 来自远端机器的快照：路径不在本机，不能在本机接管。 */
   readonly remote: boolean;
+  /** 扫描到的目录最近 7 天有活动的 agent。 */
+  readonly agents: ReadonlyArray<string>;
   readonly threads: ReadonlyArray<CardThread>;
 }
 
@@ -159,6 +161,14 @@ export function BoardPage() {
   const boardPrefs = useClientSettings();
   // 分钟级时钟：相对时间只需要分钟精度，避免整块板每秒重渲染。
   const now = Date.parse(useNowMinute());
+
+  const navigateBoard = (next: Record<string, string | undefined>) => {
+    const cleaned: Record<string, string> = {};
+    for (const [key, value] of Object.entries(next)) {
+      if (typeof value === "string" && value.length > 0) cleaned[key] = value;
+    }
+    void navigate({ to: "/board", search: cleaned as never, replace: true });
+  };
 
   const [view, setView] = useState<View>(boardPrefs.boardDefaultView);
   const [flat, setFlat] = useState(boardPrefs.boardDefaultFlat);
@@ -322,6 +332,7 @@ export function BoardPage() {
       lastCommitSubject: null,
       external: false,
       remote: false,
+      agents: [],
       threads: cardThreads,
     });
   }
@@ -359,6 +370,7 @@ export function BoardPage() {
       lastCommitSubject: project.last_commit_subject ?? null,
       external: true,
       remote: false,
+      agents: project.clis_7d ?? [],
       threads: [],
     });
   }
@@ -395,6 +407,7 @@ export function BoardPage() {
         lastCommitSubject: project.last_commit_subject ?? null,
         external: true,
         remote: true,
+        agents: project.clis_7d ?? [],
         threads: [],
       });
     }
@@ -425,12 +438,17 @@ export function BoardPage() {
   }
 
   const q = query.trim().toLowerCase();
+  // 侧边栏点机器 → /board?machine=<id>，这里把它并进机器过滤。
+  const urlMachine = search.machine;
+  const effectiveMachineFilter = urlMachine ? new Set([urlMachine]) : machineFilter;
   const visible = cards.filter((card) => {
     if (search.dir && card.path !== search.dir && !card.path.startsWith(`${search.dir}/`)) {
       return false;
     }
     if (search.env && card.environmentId !== search.env) return false;
-    if (machineFilter.size > 0 && !machineFilter.has(card.machineId)) return false;
+    if (effectiveMachineFilter.size > 0 && !effectiveMachineFilter.has(card.machineId)) {
+      return false;
+    }
     if (onlyMine && !card.needsMe) return false;
     if (!q) return true;
     return card.title.toLowerCase().includes(q) || card.path.toLowerCase().includes(q);
@@ -439,16 +457,7 @@ export function BoardPage() {
   // 选中卡片走 URL：侧边栏点项目、浏览器后退都能对上同一块板。
   const selectedKey = search.card ?? null;
   const selectCard = (key: string | null) => {
-    void navigate({
-      to: "/board",
-      search: (previous) => {
-        const next = { ...previous };
-        if (key === null) delete next.card;
-        else next.card = key;
-        return next;
-      },
-      replace: true,
-    });
+    navigateBoard({ ...search, card: key ?? undefined });
   };
   const selected = cards.find((card) => card.key === selectedKey) ?? null;
 
@@ -684,20 +693,20 @@ export function BoardPage() {
         ) : (
           <Stat value={machines.length} label="台机器正常" tone="success" />
         )}
+        {urlMachine !== undefined ? (
+          <button
+            type="button"
+            onClick={() => navigateBoard({ ...search, machine: undefined })}
+            className="flex items-center gap-1 rounded-full border border-primary/50 bg-accent px-2 py-0.5 text-2xs text-accent-foreground"
+          >
+            机器：{shortMachineName(machines.find((m) => m.id === urlMachine)?.label ?? urlMachine)}{" "}
+            ✕
+          </button>
+        ) : null}
         {search.dir ? (
           <button
             type="button"
-            onClick={() =>
-              void navigate({
-                to: "/board",
-                search: (previous) => {
-                  const next = { ...previous };
-                  delete next.dir;
-                  return next;
-                },
-                replace: true,
-              })
-            }
+            onClick={() => navigateBoard({ ...search, dir: undefined })}
             className="flex items-center gap-1 rounded-full border border-primary/50 bg-accent px-2 py-0.5 text-2xs text-accent-foreground"
           >
             目录：{displayPath(search.dir).split("/").slice(-2).join("/")} ✕
@@ -706,17 +715,7 @@ export function BoardPage() {
         {search.env ? (
           <button
             type="button"
-            onClick={() =>
-              void navigate({
-                to: "/board",
-                search: (previous) => {
-                  const next = { ...previous };
-                  delete next.env;
-                  return next;
-                },
-                replace: true,
-              })
-            }
+            onClick={() => navigateBoard({ ...search, env: undefined })}
             className="flex items-center gap-1 rounded-full border border-primary/50 bg-accent px-2 py-0.5 text-2xs text-accent-foreground"
           >
             环境：{envLabel.get(search.env) ?? search.env} ✕
@@ -724,12 +723,19 @@ export function BoardPage() {
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           {machines.map((machine) => {
-            const on = machineFilter.has(machine.id);
+            const on = effectiveMachineFilter.has(machine.id);
             return (
               <button
                 key={machine.id}
                 type="button"
-                onClick={() => setMachineFilter((set) => toggleInSet(set, machine.id))}
+                onClick={() => {
+                  if (urlMachine !== undefined) {
+                    navigateBoard({ ...search, machine: undefined });
+                    setMachineFilter(new Set([machine.id]));
+                    return;
+                  }
+                  setMachineFilter((set) => toggleInSet(set, machine.id));
+                }}
                 className={
                   on
                     ? "flex items-center gap-1.5 rounded-full border border-primary/50 bg-accent px-2 py-0.5 text-2xs text-accent-foreground"
@@ -1124,6 +1130,9 @@ function BoardCard({
         ) : null}
         {card.pr !== null ? <Badge tone="pr">PR {card.pr}</Badge> : null}
         {card.dirty ? <Badge tone="approval">有改动</Badge> : null}
+        {card.external && card.agents.length > 0 ? (
+          <Badge tone="input">{card.agents.slice(0, 2).join(" / ")}</Badge>
+        ) : null}
         {!card.external &&
         card.counts.total > 0 &&
         card.counts.running === 0 &&
@@ -1335,6 +1344,9 @@ function BoardDrawer({
           </span>
           {card.branch !== null ? <Badge>{card.branch}</Badge> : null}
           {card.dirty ? <Badge tone="approval">有改动</Badge> : null}
+          {card.external && card.agents.length > 0 ? (
+            <Badge tone="input">{card.agents.slice(0, 2).join(" / ")}</Badge>
+          ) : null}
           {card.pr !== null ? <Badge tone="pr">PR {card.pr}</Badge> : null}
           {card.external ? <Badge>未接管</Badge> : null}
           {card.manualStage ? <Badge tone="input">手动阶段</Badge> : null}
@@ -1383,6 +1395,11 @@ function BoardDrawer({
             ) : null}
             {card.lastCommitSubject !== null ? (
               <p className="text-2xs text-muted-foreground">最近提交：{card.lastCommitSubject}</p>
+            ) : null}
+            {card.agents.length > 0 ? (
+              <p className="text-2xs text-muted-foreground">
+                最近 7 天的 agent：{card.agents.join(" / ")}
+              </p>
             ) : null}
             {card.remote ? (
               <p className="text-2xs text-muted-foreground">

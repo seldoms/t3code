@@ -13,6 +13,8 @@ export interface ProjwallProject {
   readonly last_commit_at?: string | null;
   readonly last_commit_subject?: string | null;
   readonly dirty?: boolean;
+  /** 最近 7 天在这个目录里跑过的 agent CLI（codex/claude/pi…）。 */
+  readonly clis_7d?: ReadonlyArray<string>;
   readonly ahead?: number;
   readonly behind?: number;
 }
@@ -78,6 +80,9 @@ function parseProjects(snapshot: unknown): ProjwallProject[] {
       last_commit_subject:
         typeof project.last_commit_subject === "string" ? project.last_commit_subject : null,
       dirty: project.dirty === true,
+      ...(Array.isArray(project.clis_7d)
+        ? { clis_7d: project.clis_7d.filter((tool): tool is string => typeof tool === "string") }
+        : {}),
       ...(typeof project.ahead === "number" ? { ahead: project.ahead } : {}),
       ...(typeof project.behind === "number" ? { behind: project.behind } : {}),
     });

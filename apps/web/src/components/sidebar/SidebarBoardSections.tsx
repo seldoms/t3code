@@ -156,7 +156,7 @@ export function SidebarBoardSections() {
     (remote) => !envHostKeys.has(shortHost(remote.host).toLowerCase()),
   );
 
-  const openBoard = (search: { dir?: string; env?: string; card?: string }) => {
+  const openBoard = (search: { dir?: string; env?: string; card?: string; machine?: string }) => {
     closeMobile();
     void navigate({ to: "/board", search });
   };
@@ -209,7 +209,7 @@ export function SidebarBoardSections() {
         <SidebarMenuItem>
           <SidebarMenuButton
             size="sm"
-            onClick={() => openBoard({})}
+            onClick={() => openBoard({ machine: "local" })}
             onContextMenu={(event) => {
               void showAppContextMenu(event, [
                 { id: "board", label: "打开项目板" },
@@ -258,20 +258,34 @@ export function SidebarBoardSections() {
           );
           return (
             <SidebarMenuItem key={envId}>
-              <SidebarMenuButton
-                size="sm"
-                onClick={() => toggle(envId)}
-                aria-label={`展开 ${env.label} 的项目`}
-              >
-                {isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                <span
-                  className={`size-1.5 flex-none rounded-full ${online ? "bg-info" : "bg-sidebar-muted-foreground/40"}`}
-                />
-                <span className="truncate">{env.label}</span>
-                <span className="ml-auto text-2xs tabular-nums text-sidebar-muted-foreground">
-                  {totalCount}
-                </span>
-              </SidebarMenuButton>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => toggle(envId)}
+                  aria-label={`展开 ${env.label} 的项目`}
+                  className="grid size-5 flex-none place-items-center rounded text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                >
+                  {isOpen ? (
+                    <ChevronDownIcon className="size-3" />
+                  ) : (
+                    <ChevronRightIcon className="size-3" />
+                  )}
+                </button>
+                <SidebarMenuButton
+                  size="sm"
+                  className="min-w-0 flex-1"
+                  onClick={() => openBoard({ machine: env.label })}
+                  aria-label={`看板上只看 ${env.label} 的项目`}
+                >
+                  <span
+                    className={`size-1.5 flex-none rounded-full ${online ? "bg-info" : "bg-sidebar-muted-foreground/40"}`}
+                  />
+                  <span className="truncate">{env.label}</span>
+                  <span className="ml-auto text-2xs tabular-nums text-sidebar-muted-foreground">
+                    {totalCount}
+                  </span>
+                </SidebarMenuButton>
+              </div>
               {prefs.boardSidebarMachineLoad && matchedRemote ? (
                 <div className={loadLine}>{remoteLoadText(matchedRemote)}</div>
               ) : null}
@@ -372,17 +386,31 @@ export function SidebarBoardSections() {
           const isOpen = expanded.has(remote.host);
           return (
             <SidebarMenuItem key={remote.host}>
-              <SidebarMenuButton
-                size="sm"
-                onClick={() => toggle(remote.host)}
-                aria-label={`展开 ${remote.host} 的负载明细`}
-              >
-                {isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                <span
-                  className={`size-1.5 flex-none rounded-full ${remote.online ? "bg-info" : "bg-sidebar-muted-foreground/40"}`}
-                />
-                <span className="truncate">{shortHost(remote.host)}</span>
-              </SidebarMenuButton>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => toggle(remote.host)}
+                  aria-label={`展开 ${remote.host} 的负载明细`}
+                  className="grid size-5 flex-none place-items-center rounded text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                >
+                  {isOpen ? (
+                    <ChevronDownIcon className="size-3" />
+                  ) : (
+                    <ChevronRightIcon className="size-3" />
+                  )}
+                </button>
+                <SidebarMenuButton
+                  size="sm"
+                  className="min-w-0 flex-1"
+                  onClick={() => openBoard({ machine: remote.host })}
+                  aria-label={`看板上只看 ${shortHost(remote.host)} 的项目`}
+                >
+                  <span
+                    className={`size-1.5 flex-none rounded-full ${remote.online ? "bg-info" : "bg-sidebar-muted-foreground/40"}`}
+                  />
+                  <span className="truncate">{shortHost(remote.host)}</span>
+                </SidebarMenuButton>
+              </div>
               {prefs.boardSidebarMachineLoad ? (
                 <div className={loadLine}>{remoteLoadText(remote)}</div>
               ) : null}
