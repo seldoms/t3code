@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import * as Schema from "effect/Schema";
+import { ProjectBoardStage } from "@t3tools/contracts";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { boardCardActions, scannedStageKey, updateScannedStage } from "./boardCardActions";
 import { AuthOrchestrationOperateScope, EnvironmentId } from "@t3tools/contracts";
 import { useStartProjectThread } from "../../hooks/useStartProjectThread";
 import { useEnvironmentsWithScope } from "../../state/session";
@@ -34,6 +38,7 @@ import { pullRemoteSnapshots, useProjwallLatest, type ProjwallProject } from "./
 import { useHostMetrics } from "./useHostMetrics";
 
 const boardRoute = getRouteApi("/_chat/board");
+const scannedStagesSchema = Schema.Record(Schema.String, ProjectBoardStage);
 
 const normalisePath = (path: string) => path.replace(/\/+$/, "");
 const SLEEPING_AFTER_MS = 30 * 86_400_000;
@@ -193,6 +198,11 @@ export function BoardPage() {
   const [view, setView] = useState<View>(boardPrefs.boardDefaultView);
   const [flat, setFlat] = useState(boardPrefs.boardDefaultFlat);
   const [query, setQuery] = useState("");
+  const [scannedStages, setScannedStages] = useLocalStorage(
+    "t3code:scanned-board-stages:v1",
+    {} as Record<string, BoardStage>,
+    scannedStagesSchema,
+  );
   const [onlyMine, setOnlyMine] = useState(false);
   const [machineFilter, setMachineFilter] = useState<ReadonlySet<string>>(new Set());
   const [collapsed, setCollapsed] = useState<ReadonlySet<BoardStage>>(
@@ -231,43 +241,38 @@ export function BoardPage() {
     });
   };
 
+  const changeCardStage = (card: CardModel, stage: BoardStage | null) => {
+    if (card.external) {
+      setScannedStages((current) =>
+        updateScannedStage(current, scannedStageKey(card.machineId, card.path), stage),
+      );
+      setStageError(null);
+    } else if (card.projectId && card.environmentId)
+      setStage(card.projectId, card.environmentId, stage);
+  };
   const cardContextMenu = (card: CardModel) => async (event: React.MouseEvent) => {
-    const choice = await showAppContextMenu(event, [
-      { id: "open", label: "查看详情" },
-      { id: "new-thread", label: card.external ? "接管并发起对话" : "发起对话" },
-      { id: "copy", label: "复制路径" },
-      ...(card.projectId && card.environmentId
-        ? [
-            {
-              id: "stage",
-              label: "设置阶段",
-              separatorBefore: true,
-              children: [
-                ...BOARD_STAGES.map((entry) => ({
-                  id: `stage:${entry.id}`,
-                  label: entry.name,
-                  checked: card.stage === entry.id,
-                })),
-                ...(card.manualStage
-                  ? [{ id: "stage:auto", label: "恢复自动", separatorBefore: true }]
-                  : []),
-              ],
-            },
-          ]
-        : []),
-    ]);
+    const canStart =
+      card.environmentId !== null &&
+      operable.has(EnvironmentId.make(card.environmentId)) &&
+      environments.some(
+        (environment) =>
+          environment.environmentId === card.environmentId &&
+          environment.connection.phase === "connected",
+      );
+    const choice = await showAppContextMenu(event, boardCardActions(card, canStart));
     if (choice === null) return;
     if (choice === "open") selectCard(card.key);
     else if (choice === "copy") void copyText(card.path);
-    else if (choice === "new-thread") {
+    else if (choice === "new-thread")
       void starter.start(
         card.environmentId ? EnvironmentId.make(card.environmentId) : null,
         card.path,
       );
-    } else if (choice.startsWith("stage:") && card.projectId && card.environmentId) {
-      const stage = choice.slice("stage:".length);
-      setStage(card.projectId, card.environmentId, stage === "auto" ? null : (stage as BoardStage));
-    }
+    else if (choice.startsWith("thread:")) {
+      const thread = card.threads.find((entry) => entry.id === choice.slice(7));
+      if (thread) openThread(thread.environmentId, thread.id);
+    } else if (choice.startsWith("stage:"))
+      changeCardStage(card, choice === "stage:auto" ? null : asBoardStage(choice.slice(6)));
   };
 
   const threadsByProject = new Map<string, Array<(typeof threads)[number]>>();
@@ -380,14 +385,17 @@ export function BoardPage() {
       machineLabel: localLabel,
       machineOnline: true,
       path,
-      stage: derivedExternalStage(project),
-      manualStage: false,
+      stage: scannedStages[scannedStageKey("local", path)] ?? derivedExternalStage(project),
+      manualStage: scannedStages[scannedStageKey("local", path)] !== undefined,
       counts: { approval: 0, input: 0, running: 0, settled: 0, total: 0 },
       needsMe: false,
       urgency: 3,
       lastActiveAt,
       sleeping:
-        project.dirty !== true && lastActiveAt > 0 && now - lastActiveAt > SLEEPING_AFTER_MS,
+        scannedStages[scannedStageKey("local", path)] === undefined &&
+        project.dirty !== true &&
+        lastActiveAt > 0 &&
+        now - lastActiveAt > SLEEPING_AFTER_MS,
       pr: null,
       branch: project.branch ?? null,
       dirty: project.dirty === true,
@@ -407,6 +415,16 @@ export function BoardPage() {
     for (const project of remote.projects) {
       const path = normalisePath(project.path);
       if (!path.startsWith("/")) continue;
+      if (
+        sourceEnvironmentId !== null &&
+        projects.some(
+          (registered) =>
+            registered.environmentId === sourceEnvironmentId &&
+            normalisePath(registered.workspaceRoot) === path &&
+            registered.archivedAt === null,
+        )
+      )
+        continue;
       const parsed = project.last_commit_at ? Date.parse(project.last_commit_at) : Number.NaN;
       const lastActiveAt = Number.isFinite(parsed) ? parsed : 0;
       cards.push({
@@ -419,14 +437,17 @@ export function BoardPage() {
         machineLabel: remote.label,
         machineOnline: true,
         path,
-        stage: derivedExternalStage(project),
-        manualStage: false,
+        stage: scannedStages[scannedStageKey(machineId, path)] ?? derivedExternalStage(project),
+        manualStage: scannedStages[scannedStageKey(machineId, path)] !== undefined,
         counts: { approval: 0, input: 0, running: 0, settled: 0, total: 0 },
         needsMe: false,
         urgency: 3,
         lastActiveAt,
         sleeping:
-          project.dirty !== true && lastActiveAt > 0 && now - lastActiveAt > SLEEPING_AFTER_MS,
+          scannedStages[scannedStageKey(machineId, path)] === undefined &&
+          project.dirty !== true &&
+          lastActiveAt > 0 &&
+          now - lastActiveAt > SLEEPING_AFTER_MS,
         pr: null,
         branch: project.branch ?? null,
         dirty: project.dirty === true,
@@ -604,31 +625,29 @@ export function BoardPage() {
 
   const handleDrop = (stage: BoardStage) => {
     const dragged = draggingCardRef.current;
-    if (dragged?.projectId && dragged.environmentId) {
-      setStage(dragged.projectId, dragged.environmentId, stage);
-    }
+    if (dragged) changeCardStage(dragged, stage);
+    draggingCardRef.current = null;
     setDragging(null);
     setDropTarget(null);
   };
 
-  const cardDragProps = (card: CardModel) =>
-    card.external
-      ? {}
-      : {
-          draggable: true,
-          onDragStart: (event: React.DragEvent) => {
-            // Chrome 要求 dragstart 里写 data，否则整次拖拽被取消。
-            event.dataTransfer.setData("text/plain", card.path);
-            event.dataTransfer.effectAllowed = "move";
-            setDragging(card.key);
-            draggingCardRef.current = card;
-          },
-          onDragEnd: () => {
-            setDragging(null);
-            draggingCardRef.current = null;
-            setDropTarget(null);
-          },
-        };
+  const cardDragProps = (card: CardModel) => ({
+    draggable:
+      card.external ||
+      (card.environmentId !== null && operable.has(EnvironmentId.make(card.environmentId))),
+    onDragStart: (event: React.DragEvent) => {
+      // Chrome 要求 dragstart 里写 data，否则整次拖拽被取消。
+      event.dataTransfer.setData("text/plain", card.path);
+      event.dataTransfer.effectAllowed = "move";
+      setDragging(card.key);
+      draggingCardRef.current = card;
+    },
+    onDragEnd: () => {
+      setDragging(null);
+      draggingCardRef.current = null;
+      setDropTarget(null);
+    },
+  });
 
   return (
     <BoardWorkspace>
@@ -863,7 +882,20 @@ export function BoardPage() {
 
             if (isCollapsed) {
               return (
-                <section key={stage.id} className="flex w-8 flex-none flex-col">
+                <section
+                  key={stage.id}
+                  className="flex w-8 flex-none flex-col"
+                  onDragOver={(event) => {
+                    if (dragging) {
+                      event.preventDefault();
+                      setDropTarget(stage.id);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    handleDrop(stage.id);
+                  }}
+                >
                   <button
                     type="button"
                     onClick={() => setCollapsed((set) => toggleInSet(set, stage.id))}
@@ -995,6 +1027,7 @@ export function BoardPage() {
           }
           selectedKey={selectedKey}
           onSelect={selectCard}
+          onContextMenu={(card, event) => void cardContextMenu(card)(event)}
         />
       )}
 
@@ -1016,9 +1049,7 @@ export function BoardPage() {
           canAdopt={writableEnvironment !== null}
           onAdopt={() => void adoptPath(selected.path, null)}
           onStage={(stage) => {
-            if (selected.projectId && selected.environmentId) {
-              setStage(selected.projectId, selected.environmentId, stage);
-            }
+            changeCardStage(selected, stage);
           }}
           onOpenThread={openThread}
           onClose={() => selectCard(null)}
@@ -1210,7 +1241,9 @@ function BoardTable({
   onSort,
   selectedKey,
   onSelect,
+  onContextMenu,
 }: {
+  onContextMenu: (card: CardModel, event: React.MouseEvent) => void;
   cards: ReadonlyArray<CardModel>;
   now: number;
   sort: { key: SortKey; dir: 1 | -1 };
@@ -1273,6 +1306,7 @@ function BoardTable({
               <tr
                 key={card.key}
                 onClick={() => onSelect(card.key)}
+                onContextMenu={(event) => onContextMenu(card, event)}
                 className={`cursor-pointer border-b border-border/50 hover:bg-muted/50 ${selectedKey === card.key ? "bg-accent" : ""}`}
               >
                 <td className="max-w-72 px-2 py-1.5">
@@ -1384,40 +1418,43 @@ function BoardDrawer({
           <span className="ml-auto tabular-nums">{boardRelativeTime(card.lastActiveAt, now)}</span>
         </div>
 
-        {!card.external ? (
-          <div className="mt-3">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-2xs font-medium text-muted-foreground">阶段</span>
-              {card.manualStage ? (
-                <button
-                  type="button"
-                  onClick={() => onStage(null)}
-                  className="ml-auto rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                >
-                  恢复自动
-                </button>
-              ) : (
-                <span className="ml-auto text-3xs text-muted-foreground/60">按会话状态推导</span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {BOARD_STAGES.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => onStage(entry.id)}
-                  className={
-                    entry.id === card.stage
-                      ? "rounded-md border border-primary/60 bg-accent px-1.5 py-0.5 text-2xs text-accent-foreground"
-                      : "rounded-md border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60"
-                  }
-                >
-                  {entry.name}
-                </button>
-              ))}
-            </div>
+        <div className="mt-3">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-2xs font-medium text-muted-foreground">阶段</span>
+            {card.manualStage ? (
+              <button
+                type="button"
+                onClick={() => onStage(null)}
+                className="ml-auto rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              >
+                恢复自动
+              </button>
+            ) : (
+              <span className="ml-auto text-3xs text-muted-foreground/60">按会话状态推导</span>
+            )}
           </div>
-        ) : null}
+          <div className="flex flex-wrap gap-1">
+            {BOARD_STAGES.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => onStage(entry.id)}
+                className={
+                  entry.id === card.stage
+                    ? "rounded-md border border-primary/60 bg-accent px-1.5 py-0.5 text-2xs text-accent-foreground"
+                    : "rounded-md border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60"
+                }
+              >
+                {entry.name}
+              </button>
+            ))}
+          </div>
+          {card.external ? (
+            <p className="mt-1 text-3xs text-muted-foreground">
+              扫描项目的手动阶段仅保存在此设备，不会自动接管目录或发送任务。
+            </p>
+          ) : null}
+        </div>
 
         {card.external ? (
           <div className="mt-3 flex flex-col gap-2">
