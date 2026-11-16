@@ -140,6 +140,33 @@ it.effect("resumes an interrupted transfer, replaces a corrupt same-size file, a
   }).pipe(Effect.provide(dependencies)),
 );
 
+it.effect(
+  "falls back to a pinned mirror after transport failures and honors official-only mode",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      h.bodies.current = (request) =>
+        request.url.startsWith("https://hf-mirror.com/")
+          ? Stream.succeed(bytes)
+          : Stream.fail(h.transportFailure(request));
+      expect(yield* h.store.download(h.model)).toBe(h.stale);
+      expect(h.requests.map((request) => new URL(request.url).hostname)).toEqual([
+        "huggingface.co",
+        "huggingface.co",
+        "hf-mirror.com",
+      ]);
+      expect([...(yield* h.fs.readFile(h.stale))]).toEqual([...bytes]);
+      yield* h.store.remove(h.model);
+      h.requests.length = 0;
+      const result = yield* Effect.result(h.store.download(h.model, { source: "official" }));
+      expect(result._tag).toBe("Failure");
+      expect(
+        h.requests.every((request) => new URL(request.url).hostname === "huggingface.co"),
+      ).toBe(true);
+      expect(yield* h.fs.readDirectory(h.directory)).toEqual([]);
+    }).pipe(Effect.provide(dependencies)),
+);
+
 it.effect("rejects a same-size download whose SHA-256 differs from the catalog", () =>
   Effect.gen(function* () {
     const h = yield* harness;

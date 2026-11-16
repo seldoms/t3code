@@ -36,6 +36,7 @@ class SpeechModelDownloadError extends Schema.TaggedError<SpeechModelDownloadErr
 }
 
 type SpeechModelDownloadProgress = {
+  readonly source?: "auto" | "official" | "mirror";
   readonly onProgress?: (downloaded: number) => void;
   readonly onVerificationStart?: () => void;
 };
@@ -297,15 +298,20 @@ const make = Effect.gen(function* () {
         if (linked.length > 0) return finalPath;
       }
       const partialPath = `${finalPath}.${yield* random.uuidV4()}.part`;
-      const url = `https://huggingface.co/${model.id}/resolve/${model.revision}/${model.filename}`;
+      const source = progress.source ?? "auto";
+      const modelSuffix = `${model.id}/resolve/${model.revision}/${model.filename}`;
       return yield* Effect.gen(function* () {
         for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
           const offset = Number((yield* statFile(partialPath))?.size ?? 0);
           if (offset === model.size) break;
           // Transport and disk failures resume from the partial file; a bad response does not.
+          const host =
+            source === "mirror" || (source === "auto" && attempt === DOWNLOAD_ATTEMPTS)
+              ? "https://hf-mirror.com"
+              : "https://huggingface.co";
           const downloaded = yield* fetchInto(
             model,
-            url,
+            `${host}/${modelSuffix}`,
             partialPath,
             offset,
             progress.onProgress,

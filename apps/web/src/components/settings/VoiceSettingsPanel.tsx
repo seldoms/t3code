@@ -137,6 +137,7 @@ import { searchableSetting } from "./settingsSearch";
 import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 
 const OFF = "off";
 function CloudSpeechLogo({ provider }: { provider: CloudSpeechProvider }) {
@@ -729,10 +730,44 @@ function AdvancedSpeechSettings({
   catalog: VoiceModels;
 }) {
   const { run, controlsDisabled, status } = catalog;
+  const downloadSource = useEnvironmentSettings(
+    prepared.environmentId,
+    (settings) => settings.speechModelDownloadSource,
+  );
+  const updateSettings = useUpdateEnvironmentSettings(prepared.environmentId);
   if (!status?.supported) return null;
   const supported = status;
   return (
     <AdvancedSettings targetIds={[searchableSetting("speech-hardware").id]}>
+      <SettingsRow
+        title="模型下载源"
+        description="自动模式先访问 Hugging Face，网络连接失败时改用 hf-mirror.com。镜像属于第三方，只用于下载公开模型；无论来源都校验固定大小和 SHA-256，不发送音频或密钥。"
+        control={
+          <Select
+            value={downloadSource}
+            disabled={controlsDisabled}
+            onValueChange={(value) => {
+              if (value === "auto" || value === "official" || value === "mirror")
+                updateSettings({ speechModelDownloadSource: value });
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="语音模型下载源">
+              <SelectValue>
+                {downloadSource === "official"
+                  ? "官方 Hugging Face"
+                  : downloadSource === "mirror"
+                    ? "镜像 hf-mirror.com"
+                    : "自动（官方优先，失败后镜像）"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="auto">自动（官方优先，失败后镜像）</SelectItem>
+              <SelectItem value="official">官方 Hugging Face</SelectItem>
+              <SelectItem value="mirror">镜像 hf-mirror.com</SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
       <SettingsRow
         {...searchableSetting("speech-hardware")}
         title="Hardware"

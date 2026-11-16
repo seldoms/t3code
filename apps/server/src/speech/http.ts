@@ -52,7 +52,11 @@ const mapSpeechError = <A, R>(effect: Effect.Effect<A, SpeechService.SpeechError
       SpeechBusyError: () => failEnvironmentInvalidRequest("speech_busy"),
       SpeechDownloadCancelledError: () => failEnvironmentInvalidRequest("speech_busy"),
       SpeechModelNotFoundError: () => failEnvironmentInvalidRequest("invalid_command"),
-      SpeechOperationError: (error) => failEnvironmentInternal("internal_error", error),
+      SpeechOperationError: (error) =>
+        failEnvironmentInternal(
+          error.operation === "model download" ? "speech_model_download_failed" : "internal_error",
+          error,
+        ),
     }),
   );
 

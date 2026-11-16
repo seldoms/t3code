@@ -285,10 +285,13 @@ const make = Effect.gen(function* () {
     purpose: "installation" | "recording",
   ) {
     if (purpose === "recording" && now() < silenceRetryAt) return undefined;
-    const path = yield* store.download(SILERO_VAD).pipe(
-      Effect.timeout(purpose === "recording" ? "15 seconds" : "2 minutes"),
-      Effect.orElseSucceed(() => undefined),
-    );
+    const settings = yield* serverSettings.getSettings.pipe(Effect.orElseSucceed(() => undefined));
+    const path = yield* store
+      .download(SILERO_VAD, { source: settings?.speechModelDownloadSource ?? "auto" })
+      .pipe(
+        Effect.timeout(purpose === "recording" ? "15 seconds" : "2 minutes"),
+        Effect.orElseSucceed(() => undefined),
+      );
     if (path !== undefined) {
       silenceRetryAt = 0;
       return path;
@@ -311,8 +314,12 @@ const make = Effect.gen(function* () {
       fiber: Deferred.makeUnsafe<Fiber.Fiber<string, SpeechError>>(),
     };
     downloading = transfer;
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError((cause) => speechError("model download settings", cause)),
+    );
     const fiber = yield* store
       .download(definition, {
+        source: settings.speechModelDownloadSource,
         onProgress: (downloaded) => {
           transfer.downloaded = downloaded;
           transfer.verifying = false;

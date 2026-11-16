@@ -148,6 +148,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "connect_device_revoke_failed",
   "project_snapshot_failed",
   "project_mutation_failed",
+  "speech_model_download_failed",
   "orchestration_snapshot_failed",
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
@@ -264,6 +265,8 @@ export class EnvironmentInternalError extends Schema.TaggedError<EnvironmentInte
   }
 
   override get message(): string {
+    if (this.reason === "speech_model_download_failed")
+      return "语音模型下载失败。请检查目标环境网络，或在语音设置中切换模型下载源后重试；已下载模型仍需通过完整性校验。";
     return `The environment failed to answer this request (${this.reason}).`;
   }
 }
