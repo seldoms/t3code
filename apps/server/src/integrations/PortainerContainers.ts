@@ -1,6 +1,8 @@
-// @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off -- 配置文件读取与一次 Portainer 只读请求；包成 Effect 服务只会让这 150 行变复杂，收益为零。
+// @effect-diagnostics nodeBuiltinImport:off -- 配置读取与 Portainer HTTP 请求；包成 Effect 服务只会让这几百行变复杂，收益为零。
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeHttp from "node:http";
+import * as NodeHttps from "node:https";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
@@ -9,10 +11,64 @@ import * as Effect from "effect/Effect";
 
 const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
 
+interface PortainerResponse {
+  readonly status: number;
+  readonly ok: boolean;
+  readonly buffer: ArrayBuffer;
+  readonly text: string;
+}
+
+/**
+ * Portainer 请求走 node:https/http：skipTlsVerify 只决定这一个请求的证书校验，
+ * 不改全局 NODE_TLS_REJECT_UNAUTHORIZED，也不影响其他集成（审计 A07）。
+ */
+function portainerRequest(
+  config: PortainerConfig,
+  apiKey: string,
+  path: string,
+  method: "GET" | "POST",
+  timeoutMs: number,
+): Promise<PortainerResponse> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(`${config.url}${path}`);
+    const tls = url.protocol === "https:";
+    const request = (tls ? NodeHttps : NodeHttp).request(
+      url,
+      {
+        method,
+        headers: { "X-API-Key": apiKey },
+        ...(tls ? { rejectUnauthorized: !config.skipTlsVerify } : {}),
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("error", reject);
+        response.on("end", () => {
+          const body = Buffer.concat(chunks);
+          const status = response.statusCode ?? 0;
+          resolve({
+            status,
+            ok: status >= 200 && status < 300,
+            buffer: body.buffer.slice(
+              body.byteOffset,
+              body.byteOffset + body.byteLength,
+            ) as ArrayBuffer,
+            text: body.toString("utf8"),
+          });
+        });
+      },
+    );
+    request.setTimeout(timeoutMs, () => request.destroy(new Error(`timeout-${timeoutMs}ms`)));
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 /**
  * 本机集成配置：`~/.t3/integrations.json`，不进 git。密钥只写「去哪里取」：
  * apiKeyEnv（环境变量名，默认 PORTAINER_TOKEN）或 apiKeyKeychain（钥匙串服务名）。
  * portainer: { url, endpointId, apiKeyEnv?, apiKeyKeychain?, skipTlsVerify? }。
+ * skipTlsVerify 只跳过该集成请求的证书校验（自签内网），不动全局 TLS。
  */
 export interface PortainerConfig {
   readonly url: string;
@@ -132,9 +188,12 @@ export const listContainers = Effect.fn("integrations.portainer.containers")(fun
   // 免得把 error channel 传给调用方（也免得 Effect 报 unknown 需求）。
   return yield* Effect.promise<ContainersResult>(async () => {
     try {
-      const response = await fetch(
-        `${config.url}/api/endpoints/${config.endpointId}/docker/containers/json?all=1`,
-        { headers: { "X-API-Key": apiKey }, signal: AbortSignal.timeout(6000) },
+      const response = await portainerRequest(
+        config,
+        apiKey,
+        `/api/endpoints/${config.endpointId}/docker/containers/json?all=1`,
+        "GET",
+        6000,
       );
       if (!response.ok) {
         return {
@@ -145,7 +204,7 @@ export const listContainers = Effect.fn("integrations.portainer.containers")(fun
           containers: [],
         };
       }
-      const body = (await response.json()) as ReadonlyArray<Record<string, unknown>>;
+      const body = JSON.parse(response.text) as ReadonlyArray<Record<string, unknown>>;
       return {
         configured: true,
         url: config.url,
@@ -217,14 +276,16 @@ export const containerAction = Effect.fn("integrations.portainer.action")(functi
 
   return yield* Effect.promise<ContainerActionResult>(async () => {
     try {
-      const response = await fetch(
-        `${config.url}/api/endpoints/${config.endpointId}/docker/containers/${id}/${action}`,
-        { method: "POST", headers: { "X-API-Key": apiKey }, signal: AbortSignal.timeout(15000) },
+      const response = await portainerRequest(
+        config,
+        apiKey,
+        `/api/endpoints/${config.endpointId}/docker/containers/${id}/${action}`,
+        "POST",
+        15000,
       );
       // Docker 成功返回 204；304 表示已经是目标状态（如停止已停止的容器）。
       if (response.ok || response.status === 304) return { ok: true };
-      const text = await response.text().catch(() => "");
-      return { ok: false, error: `http-${response.status} ${text.slice(0, 120)}`.trim() };
+      return { ok: false, error: `http-${response.status} ${response.text.slice(0, 120)}`.trim() };
     } catch (cause) {
       return {
         ok: false,
@@ -277,12 +338,15 @@ export const containerLogs = Effect.fn("integrations.portainer.logs")(function* 
 
   return yield* Effect.promise<ContainerLogsResult>(async () => {
     try {
-      const response = await fetch(
-        `${config.url}/api/endpoints/${config.endpointId}/docker/containers/${id}/logs?stdout=1&stderr=1&tail=${lines}`,
-        { headers: { "X-API-Key": apiKey }, signal: AbortSignal.timeout(10000) },
+      const response = await portainerRequest(
+        config,
+        apiKey,
+        `/api/endpoints/${config.endpointId}/docker/containers/${id}/logs?stdout=1&stderr=1&tail=${lines}`,
+        "GET",
+        10000,
       );
       if (!response.ok) return { ok: false, error: `http-${response.status}` };
-      return { ok: true, logs: demuxDockerStream(await response.arrayBuffer()) };
+      return { ok: true, logs: demuxDockerStream(response.buffer) };
     } catch (cause) {
       return {
         ok: false,
