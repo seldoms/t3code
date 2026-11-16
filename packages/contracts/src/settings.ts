@@ -590,6 +590,12 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarDisplayMode: Schema.Literals(["threads", "projects", "project-threads"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("project-threads" as const)),
   ),
+  machineMonitorScope: Schema.Literals(["hidden", "local", "environments", "all"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("environments" as const)),
+  ),
+  hiddenMonitorMachines: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   boardSidebarDirs: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardSidebarMachineLoad: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardDefaultView: Schema.Literals(["board", "table"]).pipe(
@@ -2148,6 +2154,10 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarDisplayMode: Schema.optionalKey(
     Schema.Literals(["threads", "projects", "project-threads"]),
   ),
+  machineMonitorScope: Schema.optionalKey(
+    Schema.Literals(["hidden", "local", "environments", "all"]),
+  ),
+  hiddenMonitorMachines: Schema.optionalKey(Schema.Array(Schema.String)),
   boardSidebarDirs: Schema.optionalKey(Schema.Boolean),
   boardSidebarMachineLoad: Schema.optionalKey(Schema.Boolean),
   boardDefaultView: Schema.optionalKey(Schema.Literals(["board", "table"])),

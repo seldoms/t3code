@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { useClientSettings } from "./useSettings";
 import { Atom } from "effect/reactivity";
 import { AuthOrchestrationReadScope, type EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
@@ -31,6 +32,7 @@ const resourcesByEnvironment = Atom.family((key: string) =>
 );
 
 export function useMachineMonitor() {
+  const preferences = useClientSettings();
   const metrics = useHostMetrics();
   const { environments } = useEnvironments();
   const primaryId = usePrimaryEnvironmentId();
@@ -109,33 +111,43 @@ export function useMachineMonitor() {
   const rows = monitoredMachines(metrics, environments, primaryId);
   return {
     metrics,
-    machines: rows.map((machine) => {
-      if (machine.local || !machine.environmentId || machine.connection !== "connected")
-        return machine;
-      const detail = details.get(machine.environmentId);
-      const resource = resources.find(
-        (entry) => entry.environmentId === machine.environmentId,
-      )?.data;
-      if (!resource && !detail) return machine;
-      if (!resource)
+    allMachines: rows,
+    machines: rows
+      .filter(
+        (machine) =>
+          preferences.machineMonitorScope !== "hidden" &&
+          !preferences.hiddenMonitorMachines.includes(machine.key) &&
+          (preferences.machineMonitorScope === "all" ||
+            machine.local ||
+            (preferences.machineMonitorScope === "environments" && machine.environmentId !== null)),
+      )
+      .map((machine) => {
+        if (machine.local || !machine.environmentId || machine.connection !== "connected")
+          return machine;
+        const detail = details.get(machine.environmentId);
+        const resource = resources.find(
+          (entry) => entry.environmentId === machine.environmentId,
+        )?.data;
+        if (!resource && !detail) return machine;
+        if (!resource)
+          return {
+            ...machine,
+            cpu: detail?.cpu ?? machine.cpu,
+            memory: detail?.memPercent ?? machine.memory,
+            disk: detail?.diskPercent ?? machine.disk,
+          };
         return {
           ...machine,
-          cpu: detail?.cpu ?? machine.cpu,
-          memory: detail?.memPercent ?? machine.memory,
           disk: detail?.diskPercent ?? machine.disk,
+          cpu:
+            resource.cpuUtilization === null
+              ? machine.cpu
+              : Math.round(resource.cpuUtilization * 100),
+          memory:
+            resource.totalMemoryBytes > 0
+              ? Math.round((1 - resource.availableMemoryBytes / resource.totalMemoryBytes) * 100)
+              : machine.memory,
         };
-      return {
-        ...machine,
-        disk: detail?.diskPercent ?? machine.disk,
-        cpu:
-          resource.cpuUtilization === null
-            ? machine.cpu
-            : Math.round(resource.cpuUtilization * 100),
-        memory:
-          resource.totalMemoryBytes > 0
-            ? Math.round((1 - resource.availableMemoryBytes / resource.totalMemoryBytes) * 100)
-            : machine.memory,
-      };
-    }),
+      }),
   };
 }

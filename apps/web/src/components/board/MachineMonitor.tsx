@@ -127,6 +127,7 @@ export function MachineMonitor({
   colorFor: (machine: MonitoredMachine) => MachineColor;
   onProjects?: ((machine: MonitoredMachine) => void) | undefined;
 }) {
+  if (machines.length === 0) return null;
   return (
     <div className="min-w-0" aria-label="机器负载监控">
       <p className="mb-1 text-3xs text-muted-foreground">

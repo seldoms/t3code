@@ -1,4 +1,5 @@
 import { persistClientSettingsPatch, useClientSettings } from "../../hooks/useSettings";
+import { useMachineMonitor } from "../../hooks/useMachineMonitor";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -6,12 +7,80 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsL
 /** 项目板与侧边栏的展示偏好（本机保存，不参与项目级覆盖）。 */
 export function BoardSettingsPanel() {
   const settings = useClientSettings();
+  const { allMachines } = useMachineMonitor();
   const update = (patch: Parameters<typeof persistClientSettingsPatch>[0]) => {
     void persistClientSettingsPatch(patch);
   };
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="机器监控">
+        <SettingsRow
+          devicePreference
+          title="监控显示范围"
+          description="默认只显示本机和已添加的 T3 环境。全部主机还包含 SSH 配置中标记 private 的主机；不会自动扫描 production 主机。"
+          control={
+            <Select
+              value={settings.machineMonitorScope}
+              onValueChange={(value) => {
+                if (
+                  value === "hidden" ||
+                  value === "local" ||
+                  value === "environments" ||
+                  value === "all"
+                )
+                  update({ machineMonitorScope: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="监控显示范围">
+                <SelectValue>
+                  {
+                    {
+                      hidden: "不显示监控",
+                      local: "仅本机",
+                      environments: "本机和 T3 环境",
+                      all: "全部可监控主机",
+                    }[settings.machineMonitorScope]
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="hidden">不显示监控</SelectItem>
+                <SelectItem value="local">仅本机</SelectItem>
+                <SelectItem value="environments">本机和 T3 环境</SelectItem>
+                <SelectItem value="all">全部可监控主机</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        {allMachines.map((machine) => (
+          <SettingsRow
+            key={machine.key}
+            devicePreference
+            title={machine.name}
+            description={
+              machine.local
+                ? "本机负载"
+                : machine.environmentId
+                  ? "已添加的 T3 环境"
+                  : "SSH private 主机"
+            }
+            control={
+              <Switch
+                checked={!settings.hiddenMonitorMachines.includes(machine.key)}
+                aria-label={`显示 ${machine.name} 的监控`}
+                onCheckedChange={(checked) =>
+                  update({
+                    hiddenMonitorMachines: checked
+                      ? settings.hiddenMonitorMachines.filter((key) => key !== machine.key)
+                      : [...settings.hiddenMonitorMachines, machine.key],
+                  })
+                }
+              />
+            }
+          />
+        ))}
+      </SettingsSection>
       <SettingsSection title="侧边栏">
         <SettingsRow
           devicePreference
