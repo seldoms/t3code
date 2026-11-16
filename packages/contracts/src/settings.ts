@@ -580,7 +580,16 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   speechCorrectionWord: SpeechCorrectionCue.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   // A locale code or "system". Open string so new locales and downgrades need no migration.
-  language: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("en"))),
+  language: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("zh"))),
+  // 项目板与侧边栏的展示偏好（个人魔改，见 docs/internals/board-spec.md）。
+  boardSidebarDirs: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  boardSidebarMachineLoad: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  boardDefaultView: Schema.Literals(["board", "table"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("board" as const)),
+  ),
+  boardDefaultFlat: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  boardHostStripOpen: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  boardDoneCollapsed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   snapShotEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snapShotIncludeAccessibility: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
@@ -2119,5 +2128,11 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
+  boardSidebarDirs: Schema.optionalKey(Schema.Boolean),
+  boardSidebarMachineLoad: Schema.optionalKey(Schema.Boolean),
+  boardDefaultView: Schema.optionalKey(Schema.Literals(["board", "table"])),
+  boardDefaultFlat: Schema.optionalKey(Schema.Boolean),
+  boardHostStripOpen: Schema.optionalKey(Schema.Boolean),
+  boardDoneCollapsed: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

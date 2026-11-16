@@ -18,6 +18,7 @@ import type { ResolvedSettingsScope } from "./settingsScope";
 
 export type SettingsPath =
   | "/settings/projects"
+  | "/settings/board"
   | "/settings/general"
   | "/settings/diagnostics"
   | "/settings/voice"
@@ -95,6 +96,7 @@ export interface SettingsSearchAvailability {
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": msg("Diagnostics"),
   "/settings/projects": msg("Projects"),
+  "/settings/board": msg("Project board"),
   "/settings/general": msg("General"),
   "/settings/appearance": msg("Appearance"),
   "/settings/chat": msg("Chat"),
@@ -130,6 +132,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     paths: [
       "/settings/general",
       "/settings/appearance",
+      "/settings/board",
       "/settings/chat",
       "/settings/diffs",
       "/settings/keybindings",
@@ -1379,6 +1382,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
+  "/settings/board": null,
   "/settings/voice": null,
   "/settings/appearance": null,
   "/settings/chat": null,

@@ -22,6 +22,8 @@ import { Route as ChatUsageRouteImport } from './routes/_chat.usage'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
+import { Route as ChatContainersRouteImport } from './routes/_chat.containers'
+import { Route as ChatBoardRouteImport } from './routes/_chat.board'
 import { Route as ThreadsEnvironmentIdThreadIdRouteImport } from './routes/threads.$environmentId.$threadId'
 import { Route as ChatSettingsWorktreesRouteImport } from './routes/_chat.settings.worktrees'
 import { Route as ChatSettingsVoiceRouteImport } from './routes/_chat.settings.voice'
@@ -45,6 +47,7 @@ import { Route as ChatSettingsDevicesRouteImport } from './routes/_chat.settings
 import { Route as ChatSettingsConnectionsRouteImport } from './routes/_chat.settings.connections'
 import { Route as ChatSettingsChatRouteImport } from './routes/_chat.settings.chat'
 import { Route as ChatSettingsBrowserRouteImport } from './routes/_chat.settings.browser'
+import { Route as ChatSettingsBoardRouteImport } from './routes/_chat.settings.board'
 import { Route as ChatSettingsBetaRouteImport } from './routes/_chat.settings.beta'
 import { Route as ChatSettingsArchivedRouteImport } from './routes/_chat.settings.archived'
 import { Route as ChatSettingsAppearanceRouteImport } from './routes/_chat.settings.appearance'
@@ -115,6 +118,16 @@ const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
 const ChatNewRoute = ChatNewRouteImport.update({
   id: '/new',
   path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatContainersRoute = ChatContainersRouteImport.update({
+  id: '/containers',
+  path: '/containers',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatBoardRoute = ChatBoardRouteImport.update({
+  id: '/board',
+  path: '/board',
   getParentRoute: () => ChatRoute,
 } as any)
 const ThreadsEnvironmentIdThreadIdRoute =
@@ -237,6 +250,11 @@ const ChatSettingsBrowserRoute = ChatSettingsBrowserRouteImport.update({
   path: '/browser',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
+const ChatSettingsBoardRoute = ChatSettingsBoardRouteImport.update({
+  id: '/board',
+  path: '/board',
+  getParentRoute: () => ChatSettingsRoute,
+} as any)
 const ChatSettingsBetaRoute = ChatSettingsBetaRouteImport.update({
   id: '/beta',
   path: '/beta',
@@ -282,6 +300,8 @@ export interface FileRoutesByFullPath {
   '/guest': typeof GuestRoute
   '/pair': typeof PairRoute
   '/welcome': typeof WelcomeRoute
+  '/board': typeof ChatBoardRoute
+  '/containers': typeof ChatContainersRoute
   '/new': typeof ChatNewRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
@@ -294,6 +314,7 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/settings/archived': typeof ChatSettingsArchivedRoute
   '/settings/beta': typeof ChatSettingsBetaRoute
+  '/settings/board': typeof ChatSettingsBoardRoute
   '/settings/browser': typeof ChatSettingsBrowserRoute
   '/settings/chat': typeof ChatSettingsChatRoute
   '/settings/connections': typeof ChatSettingsConnectionsRoute
@@ -325,6 +346,8 @@ export interface FileRoutesByTo {
   '/guest': typeof GuestRoute
   '/pair': typeof PairRoute
   '/welcome': typeof WelcomeRoute
+  '/board': typeof ChatBoardRoute
+  '/containers': typeof ChatContainersRoute
   '/new': typeof ChatNewRoute
   '/pull-requests': typeof ChatPullRequestsRoute
   '/settings': typeof ChatSettingsRouteWithChildren
@@ -338,6 +361,7 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/settings/archived': typeof ChatSettingsArchivedRoute
   '/settings/beta': typeof ChatSettingsBetaRoute
+  '/settings/board': typeof ChatSettingsBoardRoute
   '/settings/browser': typeof ChatSettingsBrowserRoute
   '/settings/chat': typeof ChatSettingsChatRoute
   '/settings/connections': typeof ChatSettingsConnectionsRoute
@@ -371,6 +395,8 @@ export interface FileRoutesById {
   '/guest': typeof GuestRoute
   '/pair': typeof PairRoute
   '/welcome': typeof WelcomeRoute
+  '/_chat/board': typeof ChatBoardRoute
+  '/_chat/containers': typeof ChatContainersRoute
   '/_chat/new': typeof ChatNewRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/settings': typeof ChatSettingsRouteWithChildren
@@ -384,6 +410,7 @@ export interface FileRoutesById {
   '/_chat/settings/appearance': typeof ChatSettingsAppearanceRoute
   '/_chat/settings/archived': typeof ChatSettingsArchivedRoute
   '/_chat/settings/beta': typeof ChatSettingsBetaRoute
+  '/_chat/settings/board': typeof ChatSettingsBoardRoute
   '/_chat/settings/browser': typeof ChatSettingsBrowserRoute
   '/_chat/settings/chat': typeof ChatSettingsChatRoute
   '/_chat/settings/connections': typeof ChatSettingsConnectionsRoute
@@ -418,6 +445,8 @@ export interface FileRouteTypes {
     | '/guest'
     | '/pair'
     | '/welcome'
+    | '/board'
+    | '/containers'
     | '/new'
     | '/pull-requests'
     | '/settings'
@@ -430,6 +459,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/beta'
+    | '/settings/board'
     | '/settings/browser'
     | '/settings/chat'
     | '/settings/connections'
@@ -461,6 +491,8 @@ export interface FileRouteTypes {
     | '/guest'
     | '/pair'
     | '/welcome'
+    | '/board'
+    | '/containers'
     | '/new'
     | '/pull-requests'
     | '/settings'
@@ -474,6 +506,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/archived'
     | '/settings/beta'
+    | '/settings/board'
     | '/settings/browser'
     | '/settings/chat'
     | '/settings/connections'
@@ -506,6 +539,8 @@ export interface FileRouteTypes {
     | '/guest'
     | '/pair'
     | '/welcome'
+    | '/_chat/board'
+    | '/_chat/containers'
     | '/_chat/new'
     | '/_chat/pull-requests'
     | '/_chat/settings'
@@ -519,6 +554,7 @@ export interface FileRouteTypes {
     | '/_chat/settings/appearance'
     | '/_chat/settings/archived'
     | '/_chat/settings/beta'
+    | '/_chat/settings/board'
     | '/_chat/settings/browser'
     | '/_chat/settings/chat'
     | '/_chat/settings/connections'
@@ -647,6 +683,20 @@ declare module '@tanstack/react-router' {
       path: '/new'
       fullPath: '/new'
       preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/containers': {
+      id: '/_chat/containers'
+      path: '/containers'
+      fullPath: '/containers'
+      preLoaderRoute: typeof ChatContainersRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/board': {
+      id: '/_chat/board'
+      path: '/board'
+      fullPath: '/board'
+      preLoaderRoute: typeof ChatBoardRouteImport
       parentRoute: typeof ChatRoute
     }
     '/threads/$environmentId/$threadId': {
@@ -810,6 +860,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatSettingsBrowserRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
+    '/_chat/settings/board': {
+      id: '/_chat/settings/board'
+      path: '/board'
+      fullPath: '/settings/board'
+      preLoaderRoute: typeof ChatSettingsBoardRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
     '/_chat/settings/beta': {
       id: '/_chat/settings/beta'
       path: '/beta'
@@ -868,6 +925,7 @@ interface ChatSettingsRouteChildren {
   ChatSettingsAppearanceRoute: typeof ChatSettingsAppearanceRoute
   ChatSettingsArchivedRoute: typeof ChatSettingsArchivedRoute
   ChatSettingsBetaRoute: typeof ChatSettingsBetaRoute
+  ChatSettingsBoardRoute: typeof ChatSettingsBoardRoute
   ChatSettingsBrowserRoute: typeof ChatSettingsBrowserRoute
   ChatSettingsChatRoute: typeof ChatSettingsChatRoute
   ChatSettingsConnectionsRoute: typeof ChatSettingsConnectionsRoute
@@ -898,6 +956,7 @@ const ChatSettingsRouteChildren: ChatSettingsRouteChildren = {
   ChatSettingsAppearanceRoute: ChatSettingsAppearanceRoute,
   ChatSettingsArchivedRoute: ChatSettingsArchivedRoute,
   ChatSettingsBetaRoute: ChatSettingsBetaRoute,
+  ChatSettingsBoardRoute: ChatSettingsBoardRoute,
   ChatSettingsBrowserRoute: ChatSettingsBrowserRoute,
   ChatSettingsChatRoute: ChatSettingsChatRoute,
   ChatSettingsConnectionsRoute: ChatSettingsConnectionsRoute,
@@ -927,6 +986,8 @@ const ChatSettingsRouteWithChildren = ChatSettingsRoute._addFileChildren(
 )
 
 interface ChatRouteChildren {
+  ChatBoardRoute: typeof ChatBoardRoute
+  ChatContainersRoute: typeof ChatContainersRoute
   ChatNewRoute: typeof ChatNewRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSettingsRoute: typeof ChatSettingsRouteWithChildren
@@ -937,6 +998,8 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatBoardRoute: ChatBoardRoute,
+  ChatContainersRoute: ChatContainersRoute,
   ChatNewRoute: ChatNewRoute,
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSettingsRoute: ChatSettingsRouteWithChildren,
