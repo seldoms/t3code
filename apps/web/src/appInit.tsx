@@ -60,7 +60,6 @@ import { environmentShell } from "./state/shell";
 import { installChatRouteCommands } from "./shortcuts/chatRouteCommands";
 import { startWorkspaceFocus } from "./lib/workspaceFocus";
 import { startI18n } from "./i18n/runtime";
-import { startZhDomOverrides } from "./i18n/zhDomOverrides";
 import { installCommandPaletteCommands } from "./shortcuts/commandPaletteCommands";
 import { registerOpenFavoriteEditorCommand } from "./components/chat/OpenInPickerShortcut";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
@@ -262,7 +261,6 @@ export function startAppServices(): AppRouter {
 
   startClientAppearance();
   startI18n();
-  startZhDomOverrides();
   startDocumentTitle(router);
   startHostEnvironmentLookup();
   startEnvironmentThemeRepaint();
