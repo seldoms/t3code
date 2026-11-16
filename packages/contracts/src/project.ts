@@ -151,6 +151,17 @@ export const ReceivedProjectIcon = ForwardCompatibleUnion(projectIconMembers, "k
   ),
 );
 
+/** 项目板列。顺序即展示顺序。 */
+export const ProjectBoardStage = Schema.Literals([
+  "backlog",
+  "active",
+  "review",
+  "ship",
+  "paused",
+  "done",
+]);
+export type ProjectBoardStage = typeof ProjectBoardStage.Type;
+
 export const Project = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -165,6 +176,8 @@ export const Project = Schema.Struct({
   scripts: Schema.Array(ProjectScript),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  /** 项目板上手动拖选的阶段；null 表示按会话状态推导。 */
+  boardStage: Schema.optional(Schema.NullOr(ProjectBoardStage)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -195,6 +208,7 @@ export const ProjectUpdatePayload = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  boardStage: Schema.optional(Schema.NullOr(ProjectBoardStage)),
   pinned: Schema.optional(Schema.Boolean),
   archived: Schema.optional(
     Schema.Boolean.annotate({

@@ -84,6 +84,7 @@ function makeHarness(
               defaultModelSelection: modelSelection,
               defaultThreadEnvMode: null,
               hasCustomTitle: false,
+              boardStage: null,
               autoPull: false,
               faviconPath: null,
               projectIcon: null,

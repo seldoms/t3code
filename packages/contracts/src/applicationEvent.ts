@@ -34,6 +34,7 @@ export const ApplicationEventMetadata = Schema.Struct({
 export type ApplicationEventMetadata = typeof ApplicationEventMetadata.Type;
 
 export const ApplicationProjectCreatedPayload = Schema.Struct({
+  boardStage: Schema.optional(Schema.NullOr(Schema.String)),
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   workspaceRoot: TrimmedNonEmptyString,
@@ -62,6 +63,8 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // 项目板列的手动覆盖：absent = 不改，null = 恢复按会话推导。
+  boardStage: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: IsoDateTime,
 });
 export type ApplicationProjectMetaUpdatedPayload = typeof ApplicationProjectMetaUpdatedPayload.Type;

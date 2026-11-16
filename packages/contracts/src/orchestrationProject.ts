@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectScript, ReceivedProjectIcon } from "./project.ts";
+import { ProjectBoardStage, ProjectScript, ReceivedProjectIcon } from "./project.ts";
 
 export const OrchestrationProjectShell = Schema.Struct({
   id: ProjectId,
@@ -11,6 +11,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   // Set once someone renames the project. A folder-default title can equal the
   // repository name, so grouped labels need this to tell a chosen name apart.
   hasCustomTitle: Schema.optional(Schema.Boolean),
+  /** 项目板上手动拖选的阶段；空则由会话状态推导。 */
+  boardStage: Schema.optional(Schema.NullOr(ProjectBoardStage)),
   workspaceRoot: TrimmedNonEmptyString,
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
