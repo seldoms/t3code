@@ -15,7 +15,7 @@
 | 未接管项目                        | `GET /api/projwall/latest` → `~/.projwall/latest.json`                            | ✅ 但快照只有本机 50 个项目；多机器聚合需要各机器的快照，采集器侧待扩 |
 | 主机负载                          | `GET /api/host/metrics`（本机 + SSH remotes，含离线）                             | ✅                                                                    |
 | 容器                              | `GET /api/integrations/containers`；写操作 `POST .../action`；日志 `GET .../logs` | ✅ 独立页 /containers                                                 |
-| 手动阶段                          | `project.boardStage`（迁移 095），null = 推导                                     | ✅                                                                    |
+| 手动阶段                          | `project.boardStage`（迁移 097，原 095 被上游占用后改号），null = 推导            | ✅                                                                    |
 | 优先级 / 标签（主项目/客户/预研） | 无数据源                                                                          | ❌ 需要服务端字段，P2                                                 |
 | PR 徽章                           | thread.pullRequests（T3 项目）；外部项目无                                        | 部分                                                                  |
 
@@ -78,8 +78,9 @@
 - [x] 外部项目不推导 done（git 活动 ≠ 验收）
 - [x] 设置 → 项目板：侧边栏目录/机器负载开关、默认视图/密度、负载条展开、已收敛折叠
 - [x] 顶部精简：项目数只出现一次，负载条默认收成一行摘要，采集时间移入展开区
-- [ ] A03 全局 DOM 中文覆盖改写用户内容（审计 P1，待用户拍板：移除 or 改 opt-in）
-- [ ] A07 skipTlsVerify 未生效（审计 P2，需定 TLS 策略：受信任 CA or 按请求跳过）
+- [x] A03 全局 DOM 中文覆盖已移除（改坏用户内容/不随语言还原；新组件自带中文，其余走上游英文，正经中文化待接 GT）
+- [x] A07 skipTlsVerify 按请求生效（node:https，rejectUnauthorized 只作用于该请求，不动全局 TLS）
+- [x] 迁移改号 097 + fork ledger 修复 shim（旧 095 记录自动清理，097 幂等不丢数据，有回归测试）
 - [ ] 机器负载区可展开成主机卡片（每核利用率、温度、磁盘明细）
 - [ ] 温度授权状态机（unauthorized → authorizing → active → expired；macOS powermetrics）
 - [ ] 主机关注分级（分指标阈值 warn/crit）+ 越限时一次性闪动 + 头部「N 台需要关注」
