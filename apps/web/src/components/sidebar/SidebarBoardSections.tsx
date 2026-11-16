@@ -2,10 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "lucide-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { inferProjectTitleFromPath } from "@t3tools/client-runtime/state/projects";
 
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import { newProjectId } from "../../lib/utils";
+import { projectEnvironment } from "../../state/projects";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { toastManager } from "../ui/toast";
 import { copyText, showAppContextMenu } from "../board/appContextMenu";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useProjwallLatest } from "../board/useProjwallLatest";
@@ -42,6 +47,8 @@ export function SidebarBoardSections() {
   const handleNewThread = useNewThreadHandler();
   const { isMobile, setOpenMobile } = useSidebar();
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [startingIn, setStartingIn] = useState<string | null>(null);
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
 
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
@@ -78,6 +85,60 @@ export function SidebarBoardSections() {
     .filter(([, count]) => count >= 2)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8);
+
+  // 快照按主机名索引：侧边栏展开时把「T3 登记的」和「扫描到的目录」并排展示。
+  const snapshotForHost = (label: string) =>
+    projwall.remotes.find(
+      (remote) => shortHost(remote.label).toLowerCase() === shortHost(label).toLowerCase(),
+    );
+  const normalizePath = (path: string) => path.replace(/\/+$/, "");
+
+  /**
+   * 在某个远程目录发起对话：先在该环境登记项目（已存在就复用），再开新对话。
+   * agent 会跑在那台机器上，本机只做控制端——断网不影响远端业务。
+   */
+  const startThreadInPath = async (
+    environmentId: Parameters<typeof scopeProjectRef>[0],
+    path: string,
+    label: string,
+  ) => {
+    setStartingIn(path);
+    try {
+      const normalized = normalizePath(path);
+      const existing = projects.find(
+        (project) =>
+          project.environmentId === environmentId &&
+          normalizePath(project.workspaceRoot) === normalized,
+      );
+      let projectId = existing?.id ?? null;
+      if (projectId === null) {
+        const id = newProjectId();
+        const result = await createProject({
+          environmentId,
+          input: {
+            projectId: id,
+            title: inferProjectTitleFromPath(path),
+            workspaceRoot: path,
+            createWorkspaceRootIfMissing: false,
+            defaultModelSelection: null,
+          },
+        });
+        if (result._tag === "Failure") {
+          toastManager.add({
+            type: "error",
+            title: "登记项目失败",
+            description: `${label} 可能路径不存在，或环境当前离线。`,
+          });
+          return;
+        }
+        projectId = id;
+      }
+      closeMobile();
+      void handleNewThread(scopeProjectRef(environmentId, projectId));
+    } finally {
+      setStartingIn(null);
+    }
+  };
 
   const remoteEnvironments = environments.filter(
     (env) => primaryEnvironmentId === null || env.environmentId !== primaryEnvironmentId,
@@ -180,6 +241,17 @@ export function SidebarBoardSections() {
           const envProjects = projects.filter(
             (project) => project.environmentId === env.environmentId && project.archivedAt === null,
           );
+          const snapshot = snapshotForHost(env.label);
+          const snapshotProjects = snapshot?.projects ?? [];
+          // 侧边栏只列最近维护的 10 个，其余看板上看。
+          const recentSnapshotProjects = [...snapshotProjects]
+            .sort((a, b) => {
+              const at = a.last_commit_at ? Date.parse(a.last_commit_at) : 0;
+              const bt = b.last_commit_at ? Date.parse(b.last_commit_at) : 0;
+              return bt - at;
+            })
+            .slice(0, 10);
+          const totalCount = envProjects.length + snapshotProjects.length;
           const isOpen = expanded.has(envId);
           const matchedRemote = (hostMetrics?.remotes ?? []).find(
             (remote) => shortHost(remote.host).toLowerCase() === shortHost(env.label).toLowerCase(),
@@ -193,11 +265,11 @@ export function SidebarBoardSections() {
               >
                 {isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
                 <span
-                  className={`size-1.5 flex-none rounded-full ${online ? "bg-success" : "bg-sidebar-muted-foreground/40"}`}
+                  className={`size-1.5 flex-none rounded-full ${online ? "bg-info" : "bg-sidebar-muted-foreground/40"}`}
                 />
                 <span className="truncate">{env.label}</span>
                 <span className="ml-auto text-2xs tabular-nums text-sidebar-muted-foreground">
-                  {envProjects.length}
+                  {totalCount}
                 </span>
               </SidebarMenuButton>
               {prefs.boardSidebarMachineLoad && matchedRemote ? (
@@ -205,7 +277,7 @@ export function SidebarBoardSections() {
               ) : null}
               {isOpen ? (
                 <SidebarMenuSub>
-                  {envProjects.length === 0 ? (
+                  {envProjects.length === 0 && snapshotProjects.length === 0 ? (
                     <li className="px-2 py-1 text-2xs text-sidebar-muted-foreground">
                       {online ? "还没有项目" : "环境离线，连上后显示项目"}
                     </li>
@@ -244,6 +316,52 @@ export function SidebarBoardSections() {
                       );
                     })
                   )}
+                  {snapshot !== undefined && snapshotProjects.length > 0 ? (
+                    <>
+                      <li className="px-2 pt-1 text-3xs text-sidebar-muted-foreground">
+                        最近维护（{recentSnapshotProjects.length}/{snapshotProjects.length}）
+                      </li>
+                      {recentSnapshotProjects.map((project) => (
+                        <SidebarMenuSubItem key={project.path}>
+                          <SidebarMenuSubButton
+                            size="sm"
+                            onClick={() =>
+                              openBoard({
+                                card: `pwr:${snapshot.machine}:${normalizePath(project.path)}`,
+                              })
+                            }
+                          >
+                            <span className="truncate">{project.name}</span>
+                            {project.dirty === true ? (
+                              <span className="ml-auto text-3xs text-warning">有改动</span>
+                            ) : null}
+                            <button
+                              type="button"
+                              aria-label={`在 ${project.name} 发起对话`}
+                              disabled={startingIn === project.path}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void startThreadInPath(
+                                  env.environmentId,
+                                  normalizePath(project.path),
+                                  project.name,
+                                );
+                              }}
+                              className="grid size-4 flex-none place-items-center rounded text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground disabled:opacity-50"
+                            >
+                              <PlusIcon className="size-3" />
+                            </button>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                      {snapshotProjects.length > recentSnapshotProjects.length ? (
+                        <li className="px-2 py-1 text-3xs text-sidebar-muted-foreground">
+                          ……还有 {snapshotProjects.length - recentSnapshotProjects.length}{" "}
+                          个，看板上查看全部
+                        </li>
+                      ) : null}
+                    </>
+                  ) : null}
                 </SidebarMenuSub>
               ) : null}
             </SidebarMenuItem>
@@ -261,7 +379,7 @@ export function SidebarBoardSections() {
               >
                 {isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
                 <span
-                  className={`size-1.5 flex-none rounded-full ${remote.online ? "bg-success" : "bg-sidebar-muted-foreground/40"}`}
+                  className={`size-1.5 flex-none rounded-full ${remote.online ? "bg-info" : "bg-sidebar-muted-foreground/40"}`}
                 />
                 <span className="truncate">{shortHost(remote.host)}</span>
               </SidebarMenuButton>

@@ -101,6 +101,26 @@ type SortKey = "name" | "stage" | "machine" | "threads" | "approval" | "pr" | "a
 
 const shortHost = (host: string) => host.replace(/\.(local|lan)$/i, "");
 
+/** 机器短标识：卡片/抽屉上不重复显示长主机名。 */
+const MACHINE_SHORT: Readonly<Record<string, string>> = {
+  mac: "本机",
+  "huawei-matebook-14": "本机",
+  "sobey-thinkpad-p15-gen-1": "P15",
+  "uslab-gw-01": "uslab",
+};
+
+const shortMachineName = (label: string): string => {
+  const key = shortHost(label).toLowerCase();
+  const known = MACHINE_SHORT[key];
+  if (known !== undefined) return known;
+  return (
+    shortHost(label)
+      .replace(/^sobey-/i, "")
+      .split("-")[0]
+      ?.slice(0, 12) || shortHost(label).slice(0, 12)
+  );
+};
+
 /** 路径展示去掉用户主目录前缀，避免「seldoms/sobey」这种截断标签。 */
 const displayPath = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
 
@@ -716,8 +736,8 @@ export function BoardPage() {
                     : "flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60"
                 }
               >
-                <MachineDot online={machine.online} />
-                {machine.label}
+                <MachineDot online={machine.online} local={machine.id === "local"} />
+                {shortMachineName(machine.label)}
                 <span className="tabular-nums opacity-70">{machine.count}</span>
               </button>
             );
@@ -1013,10 +1033,12 @@ function Stat({
   );
 }
 
-function MachineDot({ online }: { online: boolean }) {
+function MachineDot({ online, local = false }: { online: boolean; local?: boolean }) {
   return (
     <span
-      className={`inline-block size-1.5 flex-none rounded-full ${online ? "bg-success" : "bg-muted-foreground/40"}`}
+      className={`inline-block size-1.5 flex-none rounded-full ${
+        !online ? "bg-muted-foreground/40" : local ? "bg-success" : "bg-info"
+      }`}
     />
   );
 }
@@ -1112,8 +1134,8 @@ function BoardCard({
       </div>
       <div className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground">
         <span className="flex min-w-0 items-center gap-1">
-          <MachineDot online={card.machineOnline} />
-          <span className="truncate">{card.machineLabel}</span>
+          <MachineDot online={card.machineOnline} local={card.machineId === "local"} />
+          <span className="truncate">{shortMachineName(card.machineLabel)}</span>
         </span>
         {card.branch !== null ? (
           <span className="max-w-24 truncate font-mono text-3xs opacity-80">{card.branch}</span>
@@ -1292,7 +1314,7 @@ function BoardDrawer({
     <aside className="absolute inset-y-0 right-0 z-30 flex w-[360px] flex-col border-l border-border bg-background shadow-2xl">
       <div className="flex flex-none items-center gap-2 border-b border-border px-4 py-2.5">
         <span className="text-2xs text-muted-foreground">
-          {card.machineLabel} <span className="opacity-50">/</span> {stage?.name}
+          {shortMachineName(card.machineLabel)} <span className="opacity-50">/</span> {stage?.name}
         </span>
         <button
           type="button"
@@ -1308,8 +1330,8 @@ function BoardDrawer({
         <div className="mt-1 break-all font-mono text-3xs text-muted-foreground">{card.path}</div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <MachineDot online={card.machineOnline} />
-            {card.machineLabel}
+            <MachineDot online={card.machineOnline} local={card.machineId === "local"} />
+            {shortMachineName(card.machineLabel)}
           </span>
           {card.branch !== null ? <Badge>{card.branch}</Badge> : null}
           {card.dirty ? <Badge tone="approval">有改动</Badge> : null}
