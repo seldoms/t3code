@@ -576,7 +576,7 @@ export function BoardPage() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <header className="flex flex-none flex-wrap items-center gap-3 border-b border-border px-4 py-2.5">
+      <header className="drag-region flex flex-none flex-wrap select-none items-center gap-3 border-b border-border px-4 py-2.5">
         <div className="flex items-baseline gap-2">
           <h1 className="text-sm font-semibold tracking-tight">项目板</h1>
           <span className="text-2xs text-muted-foreground">

@@ -19,6 +19,17 @@
 | 优先级 / 标签（主项目/客户/预研） | 无数据源                                                                          | ❌ 需要服务端字段，P2                                                 |
 | PR 徽章                           | thread.pullRequests（T3 项目）；外部项目无                                        | 部分                                                                  |
 
+## 采集策略（2026-11-16 固化）
+
+- **项目 = 含 `.git` 的目录**，从配置的扫描根出发、受限深度发现；不靠固定目录白名单。
+- Mac：扫描根 `~/sobey`(4)、`~/miniprograms`(3) + 9 个显式 items（项目管理/ima/生财有道/广西电力/中科大论文校对/openwrt-usb-airplay/deskflow/NarratoAI/agent-handoff）。
+- ThinkPad：`/sobey`(3)、`/opt`(2)、`/data`(2)、`/root/projects`(2)、`/root/games/douyin`(2)、`/root/games/adapted`(2)、`/home/sobey`(3)。
+- vps：`/root`(2)、`/opt`(2)、`/data`(2)。
+- 排除：`.worktrees/`、`artifacts/`、`candidate-*`、`custom_nodes/`、`research/upstream/`、`games/reference`、`antigravity/`；内建 PRUNE 与密钥文件跳读。
+- `forbidden`（hermes / sbmonitor / ai-video-worker 等）只记录不入板。
+- 调度：远端 systemd 每 10 分钟采集，本机 launchd 每 10 分钟拉回 `~/.projwall/remotes/`；「立即采集」手动触发。
+- 超过 30 天没活动的项目会折叠在「N 个沉睡项目」里，点开才显示。
+
 ## 阶段语义（必须一致）
 
 - `backlog 待启动`：没有会话（外部项目：未接管一律待启动，git 活动不证明完成）。
