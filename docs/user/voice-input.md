@@ -54,6 +54,12 @@ isn’t already selected. **Test model** lets you try it without sending a messa
 If you use the composer microphone before a model is installed, it offers to download one.
 The recommendation uses your Voice language, or your system’s preferred languages with **Auto-detect**.
 
+Under **Advanced → Model download source**, choose the official Hugging Face host,
+`hf-mirror.com`, or automatic fallback. Automatic mode tries the official host first
+and uses the third-party mirror after transport failures. Only public model files
+are fetched there, never recordings or API keys; every file must match its pinned
+revision, size and SHA-256 before it can be used.
+
 If another app already downloaded one of these models, you don’t need a second copy.
 **Download** first looks in Handy’s model folder and the Hugging Face cache on that
 environment and uses a copy it finds there instead of downloading. For a copy anywhere

@@ -3,6 +3,16 @@
 T3 Code integrates with GitHub, GitLab, Forgejo, Gitea, Bitbucket, Azure DevOps, GitCafe, and Cursor
 Origin to clone and publish repositories, create pull requests, and review changes.
 
+## Project-board Git actions
+
+Open a registered project on the project board and expand **代码版本管理** to
+commit locally, push, pull, or publish through the existing source-control controls.
+These operations run on the project’s own environment, not on the computer showing
+the page. Committing records a local version; pushing uploads it to the configured
+Git remote. Review the existing file and default-branch confirmations before writing.
+Gitea uses **Settings → Source control → Gitea / Forgejo** and needs credentials on
+that environment, as described below. A scanned folder must be registered first.
+
 ## Review turn changes
 
 A turn's changed files and diff show only the turn's own work. When a turn pulls, merges, or
