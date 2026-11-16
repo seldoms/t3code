@@ -319,6 +319,8 @@ publicHoistPattern:
   - "@cursor/sdk-*"
 
 minimumReleaseAgeExclude:
+  # 本机安装时 gt@2.27.0 无法通过最低发布年龄校验（registry manifest 里查不到该版本）
+  - "gt@2.27.0"
   - "@legendapp/list@3.7.2"
   - "@effect/tsgo-darwin-arm64@0.67.1"
   - "@effect/tsgo-darwin-x64@0.67.1"
