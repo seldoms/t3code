@@ -1,15 +1,20 @@
+// @effect-diagnostics nodeBuiltinImport:off -- 一次性拉起本机拉取脚本，包成 Effect 服务只会更绕。
+import * as NodeChildProcess from "node:child_process";
+import * as NodeUtil from "node:util";
+
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { AuthOrchestrationReadScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 
 import { authenticateRawRouteWithScope } from "../http.ts";
 
 // 这个模块只做只读透传，用不到 Effect 的 JSON 编解码：路径和 mtime 都是我们自己的值。
 const quote = (value: string) => JSON.stringify(value);
+const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
 
 /**
  * 只读透传 projwall 采集器快照（~/.projwall/latest.json），带 mtime 供客户端判断新鲜度。
@@ -100,5 +105,40 @@ export const layerProjwallSnapshotRoute = HttpRouter.add(
         headers: { "cache-control": "no-store" },
       },
     );
+  }),
+);
+
+/**
+ * 立即拉取一次远端快照（看板上的「立即采集」）。脚本路径固定，
+ * 不接受客户端输入；操作需要 operate scope。
+ */
+export const layerProjwallPullRoute = HttpRouter.add(
+  "POST",
+  "/api/projwall/pull-remotes",
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+    const home = yield* HostProcess.HomeDirectory;
+    const result = yield* Effect.promise<{ ok: boolean; output?: string; error?: string }>(
+      async () => {
+        try {
+          const { stdout, stderr } = await execFileAsync(
+            "/bin/sh",
+            [`${home}/.projwall/pull_remotes.sh`],
+            { encoding: "utf8", timeout: 120_000 },
+          );
+          return { ok: true, output: `${stdout}${stderr}`.slice(-2000) };
+        } catch (cause) {
+          return {
+            ok: false,
+            error: cause instanceof Error ? cause.message.slice(0, 300) : "pull-failed",
+          };
+        }
+      },
+    );
+    return HttpServerResponse.text(JSON.stringify(result), {
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+    });
   }),
 );

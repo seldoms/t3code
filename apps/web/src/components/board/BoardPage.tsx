@@ -23,7 +23,7 @@ import {
   deriveBoardStage,
 } from "./boardStages";
 import { copyText, showAppContextMenu } from "./appContextMenu";
-import { useProjwallLatest, type ProjwallProject } from "./useProjwallLatest";
+import { pullRemoteSnapshots, useProjwallLatest, type ProjwallProject } from "./useProjwallLatest";
 import { useHostMetrics } from "./useHostMetrics";
 
 const boardRoute = getRouteApi("/_chat/board");
@@ -84,6 +84,8 @@ interface CardModel {
   readonly lastCommitSubject: string | null;
   /** 采集器里有、T3 里没接管：只能看，不能开会话。 */
   readonly external: boolean;
+  /** 来自远端机器的快照：路径不在本机，不能在本机接管。 */
+  readonly remote: boolean;
   readonly threads: ReadonlyArray<CardThread>;
 }
 
@@ -149,6 +151,8 @@ export function BoardPage() {
   const [showSleeping, setShowSleeping] = useState<ReadonlySet<BoardStage>>(new Set());
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "active", dir: -1 });
   const [dialog, setDialog] = useState<{ stage: BoardStage | null } | null>(null);
+  const [pulling, setPulling] = useState(false);
+  const [pullError, setPullError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<BoardStage | null>(null);
   const [panning, setPanning] = useState(false);
@@ -221,6 +225,18 @@ export function BoardPage() {
     else threadsByProject.set(key, [thread]);
   }
 
+  // 同一台机器可能同时是 T3 环境、SSH 主机、快照来源：按主机名归一到同一个过滤 id。
+  const remoteMachineId = (machine: string, label: string) => {
+    const normalized = shortHost(label).toLowerCase();
+    for (const env of environments) {
+      if (shortHost(env.label).toLowerCase() === normalized) return env.label;
+    }
+    for (const host of hostMetrics?.remotes ?? []) {
+      if (shortHost(host.host).toLowerCase() === normalized) return host.host;
+    }
+    return `remote:${machine}`;
+  };
+
   const cards: CardModel[] = [];
   const coveredPaths = new Set<string>();
 
@@ -285,6 +301,7 @@ export function BoardPage() {
       purpose: null,
       lastCommitSubject: null,
       external: false,
+      remote: false,
       threads: cardThreads,
     });
   }
@@ -321,8 +338,46 @@ export function BoardPage() {
       purpose: project.purpose?.trim() || null,
       lastCommitSubject: project.last_commit_subject ?? null,
       external: true,
+      remote: false,
       threads: [],
     });
+  }
+
+  // 远端机器拉回来的快照：同样只读展示，但不能在本机接管。
+  for (const remote of projwall.remotes) {
+    const machineId = remoteMachineId(remote.machine, remote.label);
+    for (const project of remote.projects) {
+      const path = normalisePath(project.path);
+      if (!path.startsWith("/")) continue;
+      const parsed = project.last_commit_at ? Date.parse(project.last_commit_at) : Number.NaN;
+      const lastActiveAt = Number.isFinite(parsed) ? parsed : 0;
+      cards.push({
+        key: `pwr:${remote.machine}:${path}`,
+        projectId: null,
+        environmentId: null,
+        title: project.name,
+        machineId,
+        machineLabel: remote.label,
+        machineOnline: true,
+        path,
+        stage: derivedExternalStage(project),
+        manualStage: false,
+        counts: { approval: 0, input: 0, running: 0, settled: 0, total: 0 },
+        needsMe: false,
+        urgency: 3,
+        lastActiveAt,
+        sleeping:
+          project.dirty !== true && lastActiveAt > 0 && now - lastActiveAt > SLEEPING_AFTER_MS,
+        pr: null,
+        branch: project.branch ?? null,
+        dirty: project.dirty === true,
+        purpose: project.purpose?.trim() || null,
+        lastCommitSubject: project.last_commit_subject ?? null,
+        external: true,
+        remote: true,
+        threads: [],
+      });
+    }
   }
 
   const machines: MachineModel[] = [];
@@ -344,6 +399,9 @@ export function BoardPage() {
   }
   for (const remote of hostMetrics?.remotes ?? []) {
     pushMachine(remote.host, shortHost(remote.host), remote.online);
+  }
+  for (const remote of projwall.remotes) {
+    pushMachine(remoteMachineId(remote.machine, remote.label), shortHost(remote.label), true);
   }
 
   const q = query.trim().toLowerCase();
@@ -483,7 +541,9 @@ export function BoardPage() {
     (card) => card.lastActiveAt > 0 && now - card.lastActiveAt < DAY_MS,
   ).length;
   const offlineMachines = machines.filter((machine) => !machine.online).length;
-  const externalCount = cards.filter((card) => card.external).length;
+  // 远端快照的路径不在本机，不能接管：只统计本机的未接管项目。
+  const adoptableCards = cards.filter((card) => card.external && !card.remote);
+  const externalCount = adoptableCards.length;
   const totalThreads = cards.reduce((sum, card) => sum + card.counts.total, 0);
 
   const handleDrop = (stage: BoardStage) => {
@@ -558,6 +618,24 @@ export function BoardPage() {
             placeholder="搜索项目 / 路径"
             className="h-7 w-52 rounded-md border border-border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
           />
+          <button
+            type="button"
+            disabled={pulling}
+            onClick={() => {
+              setPulling(true);
+              setPullError(null);
+              void pullRemoteSnapshots()
+                .then((result) => {
+                  setPulling(false);
+                  if (!result.ok) setPullError(result.error ?? "采集失败");
+                  projwall.refresh();
+                })
+                .catch(() => setPulling(false));
+            }}
+            className="rounded-md border border-border px-2 py-1 text-2xs text-muted-foreground hover:bg-muted/60 disabled:opacity-50"
+          >
+            {pulling ? "采集中…" : "立即采集"}
+          </button>
           <button
             type="button"
             disabled={!writableEnvironment}
@@ -659,9 +737,7 @@ export function BoardPage() {
             <button
               type="button"
               disabled={adoptingAll !== null || !writableEnvironment}
-              onClick={() =>
-                void adoptAll(cards.filter((card) => card.external).map((card) => card.path))
-              }
+              onClick={() => void adoptAll(adoptableCards.map((card) => card.path))}
               className="rounded-full border border-border px-2 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60 disabled:opacity-50"
             >
               {adoptingAll
@@ -675,6 +751,11 @@ export function BoardPage() {
       {adoptError && dialog === null ? (
         <div className="flex-none border-b border-border px-4 py-1 text-2xs text-warning">
           {adoptError}
+        </div>
+      ) : null}
+      {pullError !== null ? (
+        <div className="flex-none border-b border-border px-4 py-1 text-2xs text-warning">
+          远端采集失败：{pullError}
         </div>
       ) : null}
       {stageError !== null ? (
@@ -715,7 +796,7 @@ export function BoardPage() {
               else if (choice === "table") setView("table");
               else if (choice === "new") setDialog({ stage: null });
               else if (choice === "adopt") {
-                void adoptAll(cards.filter((card) => card.external).map((card) => card.path));
+                void adoptAll(adoptableCards.map((card) => card.path));
               }
             });
           }}
@@ -1281,18 +1362,27 @@ function BoardDrawer({
             {card.lastCommitSubject !== null ? (
               <p className="text-2xs text-muted-foreground">最近提交：{card.lastCommitSubject}</p>
             ) : null}
-            <p className="text-2xs text-muted-foreground">采集器扫到的项目，T3 还没接管。</p>
-            <button
-              type="button"
-              disabled={adopting || !canAdopt}
-              onClick={onAdopt}
-              className="self-start rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
-            >
-              {adopting ? "接管中…" : "在 T3 中接管"}
-            </button>
-            {adoptError !== null ? (
-              <span className="text-2xs text-warning">{adoptError}</span>
-            ) : null}
+            {card.remote ? (
+              <p className="text-2xs text-muted-foreground">
+                这是 {card.machineLabel}{" "}
+                上的项目，路径不在本机；到那台机器的环境里发起对话即可登记。
+              </p>
+            ) : (
+              <>
+                <p className="text-2xs text-muted-foreground">采集器扫到的项目，T3 还没接管。</p>
+                <button
+                  type="button"
+                  disabled={adopting || !canAdopt}
+                  onClick={onAdopt}
+                  className="self-start rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground hover:brightness-110 disabled:opacity-50"
+                >
+                  {adopting ? "接管中…" : "在 T3 中接管"}
+                </button>
+                {adoptError !== null ? (
+                  <span className="text-2xs text-warning">{adoptError}</span>
+                ) : null}
+              </>
+            )}
           </div>
         ) : card.threads.length === 0 ? (
           <div className="mt-3 flex flex-col gap-2">

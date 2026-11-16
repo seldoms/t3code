@@ -845,6 +845,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     ProjwallSnapshotHttp.layerProjwallSnapshotRoute,
+    ProjwallSnapshotHttp.layerProjwallPullRoute,
     HostMetricsHttp.layerHostMetricsRoute,
     IntegrationsHttp.layerIntegrationsRoute,
     IntegrationsHttp.layerContainerActionRoute,
