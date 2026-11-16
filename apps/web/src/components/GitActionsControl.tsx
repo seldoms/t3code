@@ -132,6 +132,7 @@ import { useOpenLink } from "~/browser/useOpenLink";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
+  environmentId?: import("@t3tools/contracts").EnvironmentId;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
   compact?: boolean;
@@ -915,6 +916,7 @@ export function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
 
 export default function GitActionsControl({
   gitCwd,
+  environmentId,
   activeThreadRef,
   draftId,
   compact = false,
@@ -929,7 +931,7 @@ export default function GitActionsControl({
     threadEnvironment.updateMetadata,
     "thread branch metadata update",
   );
-  const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
+  const activeEnvironmentId = activeThreadRef?.environmentId ?? environmentId ?? null;
   const successScopeKey = `${activeEnvironmentId ?? ""}\u0000${gitCwd ?? ""}`;
   const canWriteSourceControl = useEnvironmentScope(
     activeEnvironmentId,

@@ -13,6 +13,7 @@ import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { LayoutGridIcon, Rows3Icon } from "lucide-react";
 import { MachineMonitor } from "./MachineMonitor";
 import { BoardWorkspace } from "./BoardWorkspace";
+import GitActionsControl from "../GitActionsControl";
 import { useMachineMonitor } from "../../hooks/useMachineMonitor";
 import { inferProjectTitleFromPath } from "@t3tools/client-runtime/state/projects";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
@@ -1456,6 +1457,26 @@ function BoardDrawer({
           ) : null}
         </div>
 
+        {!card.external && card.environmentId ? (
+          <details className="mt-3 rounded border border-border p-2">
+            <summary className="cursor-pointer text-xs font-medium">
+              代码版本管理 · 提交 / 上传 / 拉取
+            </summary>
+            <p className="my-2 text-2xs text-muted-foreground">
+              操作在项目所属机器执行。提交只保存本地版本；上传会同步到 Git 远端。Gitea 凭据在「设置
+              → 源代码管理 → Gitea / Forgejo」中管理。
+            </p>
+            <GitActionsControl
+              environmentId={EnvironmentId.make(card.environmentId)}
+              activeThreadRef={null}
+              gitCwd={card.path}
+              showChanges={false}
+            />
+            <a className="mt-2 inline-block text-2xs text-info" href="/settings/source-control">
+              配置 Gitea 与代码托管
+            </a>
+          </details>
+        ) : null}
         {card.external ? (
           <div className="mt-3 flex flex-col gap-2">
             {card.purpose !== null ? (

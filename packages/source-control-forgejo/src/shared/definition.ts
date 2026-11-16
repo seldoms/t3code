@@ -60,7 +60,7 @@ function changeRequestHost(identity: ChangeRequestHostIdentity): string {
 
 export const definition = defineSourceControl({
   kind: KIND,
-  label: "Forgejo",
+  label: "Gitea / Forgejo",
   pickerLabel: "Forgejo / Gitea",
   icon,
   searchKeywords: ["gitea", "tea", "codeberg"],
