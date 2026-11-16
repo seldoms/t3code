@@ -128,14 +128,16 @@ async function sampleGpu(platform: string): Promise<number | null> {
   return gpuInFlight;
 }
 
-async function readDisk(): Promise<{ used: number; total: number }> {
+async function readDisk(): Promise<{ used: number; total: number; avail: number }> {
   try {
     const stats = await NodeFSP.statfs("/");
     const total = stats.blocks * stats.bsize;
     const free = stats.bfree * stats.bsize;
-    return { used: total - free, total };
+    // 容量口径跟 df 对齐：used/(used+avail)，保留块不能算进百分比。
+    const avail = stats.bavail * stats.bsize;
+    return { used: total - free, total, avail };
   } catch {
-    return { used: 0, total: 0 };
+    return { used: 0, total: 0, avail: 0 };
   }
 }
 
@@ -184,7 +186,8 @@ export const sampleHostMetrics = Effect.fn("hostMetrics.sample")(function* () {
     memPercent: memTotal > 0 ? Math.round((memUsed / memTotal) * 100) : 0,
     diskUsed: disk.used,
     diskTotal: disk.total,
-    diskPercent: disk.total > 0 ? Math.round((disk.used / disk.total) * 100) : 0,
+    diskPercent:
+      disk.total > 0 ? Math.round((disk.used / Math.max(1, disk.used + disk.avail)) * 100) : 0,
     gpu: yield* Effect.promise(() => sampleGpu(platform)),
     uptimeSeconds: Math.round(NodeOS.uptime()),
   };
