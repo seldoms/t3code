@@ -62,6 +62,8 @@ function parseProjects(snapshot: unknown): ProjwallProject[] {
   for (const entry of rawProjects) {
     if (typeof entry !== "object" || entry === null) continue;
     const project = entry as Record<string, unknown>;
+    // 禁区条目只是「知道它在」，不是项目，看板不展示。
+    if (project.kind === "forbidden") continue;
     const path = typeof project.path === "string" ? project.path : null;
     const name =
       typeof project.name === "string" ? project.name : (path?.split("/").at(-1) ?? null);
