@@ -34,6 +34,10 @@ import * as KeepAwake from "./background/KeepAwake.ts";
 import * as ServerConfig from "./config.ts";
 import { withUntracedRequests } from "./http.ts";
 import * as ServerHttp from "./http.ts";
+import * as ProjwallSnapshotHttp from "./projwall/ProjwallSnapshotHttp.ts";
+import * as HostMetricsHttp from "./hostmetrics/HostMetricsHttp.ts";
+import * as IntegrationsHttp from "./integrations/IntegrationsHttp.ts";
+import { warmHostMetrics } from "./hostmetrics/HostMetrics.ts";
 import {
   guardHttpResponseWriteErrors,
   keepIdleConnections,
@@ -840,6 +844,11 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
+    ProjwallSnapshotHttp.layerProjwallSnapshotRoute,
+    HostMetricsHttp.layerHostMetricsRoute,
+    IntegrationsHttp.layerIntegrationsRoute,
+    IntegrationsHttp.layerContainerActionRoute,
+    IntegrationsHttp.layerContainerLogsRoute,
     GuestHttp.layer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
@@ -917,6 +926,8 @@ const layerMakeServer = Layer.unwrap(
         yield* HttpServer.HttpServer;
         const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
         yield* startup.markHttpListening;
+        // 预热 CPU 基线：看板第一个负载请求就有数字，不用等一个采样周期。
+        yield* warmHostMetrics;
       }),
     );
     const layerDesktopReadySignal = Layer.effectDiscard(
