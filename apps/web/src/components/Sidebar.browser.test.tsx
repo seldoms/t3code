@@ -12,7 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { isMacPlatform } from "@t3tools/shared/keybindings";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, fakeTimers, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -27,6 +27,8 @@ import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import type { Project } from "../types";
 import Sidebar from "./Sidebar";
+import { useSidebarHostFilter } from "../sidebarHostFilter";
+import { useUiStateStore } from "../uiStateStore";
 import { THREAD_JUMP_HINT_SHOW_DELAY_MS } from "./Sidebar.logic";
 import { SortableThreadRow } from "./sidebar/SidebarThreadRow";
 import { SidebarProvider } from "./ui/sidebar";
@@ -88,6 +90,7 @@ describe("sidebar header new thread", () => {
     __setClientSettingsForTests({
       ...DEFAULT_CLIENT_SETTINGS,
       boringSidebarEnabled: scenario.mode === "boring",
+      sidebarDisplayMode: scenario.mode === "boring" ? "project-threads" : "threads",
     });
     const projects = [project("active"), project("idle")].slice(0, scenario.count);
     const currentProjectRef = {
@@ -261,9 +264,135 @@ describe("sidebar thread rename", () => {
   );
 });
 
+describe("project tree and host scope", () => {
+  it("nests all thread states under their project and applies an exclusive host filter", async () => {
+    await page.viewport(1280, 800);
+    using stack = new DisposableStack();
+    const style = document.createElement("style");
+    style.textContent = appCss;
+    document.head.append(style);
+    stack.defer(() => style.remove());
+    const settings = getClientSettings();
+    const filter = useSidebarHostFilter.getState();
+    const ui = useUiStateStore.getState();
+    stack.defer(() => __setClientSettingsForTests(settings));
+    stack.defer(() => useSidebarHostFilter.setState(filter, true));
+    stack.defer(() => useUiStateStore.setState(ui, true));
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      sidebarDisplayMode: "project-threads",
+    });
+    useSidebarHostFilter.getState().select(null);
+    useUiStateStore.setState({ projectExpandedById: {}, sidebarProjectScopeKeys: [] });
+    const local = project("Mac Project");
+    const remote = {
+      ...project("VPS Project"),
+      environmentId: EnvironmentId.make("vps"),
+      workspaceRoot: "/vps/project",
+    };
+    const threads = [
+      makeThreadFixture({
+        environmentId: local.environmentId,
+        projectId: local.id,
+        id: ThreadId.make("local-tree"),
+        title: "Mac conversation",
+      }),
+      makeThreadFixture({
+        environmentId: remote.environmentId,
+        projectId: remote.id,
+        id: ThreadId.make("remote-tree"),
+        title: "VPS conversation",
+      }),
+      makeThreadFixture({
+        environmentId: remote.environmentId,
+        projectId: remote.id,
+        id: ThreadId.make("pinned-tree"),
+        title: "Pinned VPS conversation",
+        pinnedAt: "2026-01-01T00:00:00.000Z",
+      }),
+      makeThreadFixture({
+        environmentId: remote.environmentId,
+        projectId: remote.id,
+        id: ThreadId.make("settled-tree"),
+        title: "Settled VPS conversation",
+        settledOverride: "settled",
+        settledAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ];
+    vi.mocked(useProjects).mockReturnValue([local, remote]);
+    vi.mocked(useQuietThreadShells).mockReturnValue(threads);
+    vi.mocked(useNowMinute).mockReturnValue("2026-01-01T00:00");
+    vi.mocked(useThreadRouteTarget).mockReturnValue(null);
+    vi.mocked(useServerConfigs).mockReturnValue(
+      new Map(
+        [local, remote].map((entry) => [
+          entry.environmentId,
+          {
+            environment: { capabilities: {} },
+            settings: {},
+            scratchWorkspaceRoot: null,
+            shellThreadFamilies: false,
+          } as unknown as EnvironmentServerConfig,
+        ]),
+      ),
+    );
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: { environmentId: remote.environmentId, projectId: remote.id },
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: null,
+    });
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    await expect.element(screen.getByText("Mac conversation", { exact: true })).toBeVisible();
+    await expect.element(screen.getByText("VPS conversation", { exact: true })).toBeVisible();
+    await expect
+      .element(screen.getByText("Pinned VPS conversation", { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(screen.getByText("Settled VPS conversation", { exact: true }))
+      .toBeVisible();
+    await act(() =>
+      useSidebarHostFilter
+        .getState()
+        .select({ key: "vps", environmentId: remote.environmentId, name: "VPS" }),
+    );
+    await expect
+      .element(screen.getByText("Mac conversation", { exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(screen.getByRole("button", { name: "Mac Project", exact: true }))
+      .not.toBeInTheDocument();
+    const folder = screen.getByRole("button", { name: /^VPS Project/ });
+    await act(() => (folder.element() as HTMLButtonElement).click());
+    await expect.element(folder).toHaveAttribute("aria-expanded", "false");
+    for (const title of ["VPS conversation", "Pinned VPS conversation", "Settled VPS conversation"])
+      await expect.element(screen.getByText(title, { exact: true })).not.toBeInTheDocument();
+    await act(() => (folder.element() as HTMLButtonElement).click());
+    await expect
+      .element(screen.getByText("Pinned VPS conversation", { exact: true }))
+      .toBeVisible();
+    await act(() =>
+      useSidebarHostFilter
+        .getState()
+        .select({ key: "vps", environmentId: remote.environmentId, name: "VPS" }),
+    );
+    await expect.element(screen.getByText("Mac conversation", { exact: true })).toBeVisible();
+  });
+});
+
 describe("sidebar settled pagination", () => {
   it("keeps the viewport in place when showing more settled threads", async () => {
     using stack = new DisposableStack();
+    const previousSettings = getClientSettings();
+    stack.defer(() => __setClientSettingsForTests(previousSettings));
+    __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, sidebarDisplayMode: "threads" });
     const style = document.createElement("style");
     style.textContent = appCss;
     document.head.append(style);

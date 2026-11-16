@@ -209,6 +209,12 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
+## Local fork sidebar
+
+- Project-tree mode nests drafts and every thread state under the project; collapsing hides the entire subtree, including the active conversation. Flat thread mode keeps its shelves.
+- `sidebarHostFilter.ts` is the single host scope for project groups, threads and search. Null means all; selecting the same host clears it. Filter before logical project grouping so a local representative never starts work on behalf of a remote selection.
+- Keep monitoring and project selection separate: selecting a host filters the one project tree, not a second list of registered projects inside monitoring.
+
 ## Local fork monitoring
 
 - Board and container route roots must fill the flex app shell; reuse `components/board/BoardWorkspace.tsx` for the board. Verify wide and narrow layout captures before packaging.

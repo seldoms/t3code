@@ -1,4 +1,5 @@
 import { attachSidebarTree } from "../lib/sidebarTree";
+import { matchesSidebarHost, useSidebarHostFilter } from "../sidebarHostFilter";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import {
@@ -530,7 +531,17 @@ function useSidebarThreads(input: {
   const projectFolders =
     folderGroups === null
       ? null
-      : groupSidebarThreadsByProject(folderGroups, activeThreads, keepEmpty).map((folder) => {
+      : groupSidebarThreadsByProject(
+          folderGroups,
+          [
+            ...pinnedThreads,
+            ...workingThreads,
+            ...activeThreads,
+            ...snoozedThreads,
+            ...listedSettledThreads,
+          ],
+          keepEmpty,
+        ).map((folder) => {
           const collapsed = !resolveProjectExpanded(
             projectExpandedById,
             sidebarFolderExpansionKeys(folder.group),
@@ -538,24 +549,20 @@ function useSidebarThreads(input: {
           return {
             group: folder.group,
             collapsed,
-            // A closed folder still shows the open thread, and hints at the rest.
-            threads: collapsed
-              ? routeThreadOnly(folder.threads, routeRowThreadKey)
-              : folder.threads,
-            hiddenThreads: collapsed
-              ? folder.threads.filter((thread) => threadShellKey(thread) !== routeRowThreadKey)
-              : EMPTY_THREADS,
+            threads: collapsed ? EMPTY_THREADS : folder.threads,
+            hiddenThreads: collapsed ? folder.threads : EMPTY_THREADS,
           };
         });
-  const orderedThreads = [
-    ...pinnedThreads,
-    ...(projectFolders === null
-      ? activeThreads
-      : projectFolders.flatMap((folder) => folder.threads)),
-    ...visibleWorkingThreads,
-    ...visibleSnoozedThreads,
-    ...renderedSettledThreads,
-  ];
+  const orderedThreads =
+    projectFolders !== null
+      ? projectFolders.flatMap((folder) => folder.threads)
+      : [
+          ...pinnedThreads,
+          ...activeThreads,
+          ...visibleWorkingThreads,
+          ...visibleSnoozedThreads,
+          ...renderedSettledThreads,
+        ];
   const sectionByThreadKey = new Map<string, SidebarSection>();
   for (const [list, section] of [
     [pinnedThreads, "pinned"],
@@ -1107,7 +1114,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ),
         );
-  const threads = useQuietThreadShells();
+  const allThreads = useQuietThreadShells();
+  const hostFilter = useSidebarHostFilter((state) => state.selected);
+  const threads = allThreads.filter((thread) =>
+    matchesSidebarHost(thread.environmentId, hostFilter),
+  );
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
     promotingDraftThreadKeys.length === 0
@@ -1187,9 +1198,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
-  const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
+  const projectScope = revealWidensScope ? null : chosenScopeProjectKeys;
+  const scopedProjectKeys =
+    hostFilter === null
+      ? projectScope
+      : new Set(
+          projects
+            .filter(
+              (project) =>
+                matchesSidebarHost(project.environmentId, hostFilter) &&
+                (projectScope === null ||
+                  projectScope.has(`${project.environmentId}:${project.id}`)),
+            )
+            .map((project) => `${project.environmentId}:${project.id}`),
+        );
   const threadSearch = useThreadSearch(
-    connectedEnvironmentIds,
+    connectedEnvironmentIds.filter((id) => matchesSidebarHost(id, hostFilter)),
     threadSearchQuery,
     scopedProjectGroups.length === 0
       ? {}
@@ -3543,25 +3567,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         );
                       };
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
-                      const items: ReactNode[] = [
-                        <SidebarDraftBlock
-                          key="draft-sessions"
-                          projectByKey={projectByKey}
-                          projectDisplayNameByKey={projectDisplayNameByKey}
-                          scopedProjectKeys={scopedProjectKeys}
-                          routeDraftId={routeDraftIdForRows}
-                          onNavigateToDraft={navigateToDraft}
-                          onDraftContextMenu={handleDraftContextMenu}
-                        />,
-                      ];
+                      const items: ReactNode[] = [];
+                      if (projectFolders === null)
+                        items.push(
+                          <SidebarDraftBlock
+                            key="draft-sessions"
+                            projectByKey={projectByKey}
+                            projectDisplayNameByKey={projectDisplayNameByKey}
+                            scopedProjectKeys={scopedProjectKeys}
+                            routeDraftId={routeDraftIdForRows}
+                            onNavigateToDraft={navigateToDraft}
+                            onDraftContextMenu={handleDraftContextMenu}
+                          />,
+                        );
                       for (const item of sidebarListItems) {
-                        if (item.kind === "thread") {
-                          // Folders draw active rows in their own place below.
-                          if (projectFolders !== null && item.section === "active") continue;
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
-                          continue;
-                        }
-                        if (projectFolders !== null && item.marker === "active-placeholder") {
+                        if (projectFolders !== null) {
+                          if (item.kind !== "marker" || item.marker !== "active-placeholder")
+                            continue;
                           for (const folder of projectFolders) {
                             items.push(
                               <SidebarProjectFolderHeader
@@ -3576,18 +3598,36 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 }
                                 onArchive={canPinProject(folder.group) ? archiveProject : undefined}
                                 onContextMenu={handleProjectFolderContextMenu}
-                              />,
+                              >
+                                <SidebarDraftBlock
+                                  projectByKey={projectByKey}
+                                  projectDisplayNameByKey={projectDisplayNameByKey}
+                                  scopedProjectKeys={
+                                    new Set(
+                                      folder.group.memberProjectRefs.map(
+                                        (ref) => `${ref.environmentId}:${ref.projectId}`,
+                                      ),
+                                    )
+                                  }
+                                  routeDraftId={routeDraftIdForRows}
+                                  navigationParent={sidebarFolderRowId(folder.group.projectKey)}
+                                  onNavigateToDraft={navigateToDraft}
+                                  onDraftContextMenu={handleDraftContextMenu}
+                                />
+                                {folder.threads.map((thread) =>
+                                  renderThreadRow(
+                                    thread,
+                                    sectionByThreadKey.get(threadShellKey(thread)) ?? "active",
+                                    sidebarFolderRowId(folder.group.projectKey),
+                                  ),
+                                )}
+                              </SidebarProjectFolderHeader>,
                             );
-                            for (const thread of folder.threads) {
-                              items.push(
-                                renderThreadRow(
-                                  thread,
-                                  "active",
-                                  sidebarFolderRowId(folder.group.projectKey),
-                                ),
-                              );
-                            }
                           }
+                          continue;
+                        }
+                        if (item.kind === "thread") {
+                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
                         switch (item.marker) {

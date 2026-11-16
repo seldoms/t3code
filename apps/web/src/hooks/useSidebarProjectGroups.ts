@@ -8,9 +8,12 @@ import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/envi
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
+import { matchesSidebarHost, useSidebarHostFilter } from "../sidebarHostFilter";
 
 export function useSidebarProjectGroups() {
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const host = useSidebarHostFilter((state) => state.selected);
+  const projects = allProjects.filter((project) => matchesSidebarHost(project.environmentId, host));
   // Activity order lags a running thread's streaming ticks until its next
   // real change; reading every tick re-rendered the whole sidebar with it.
   const threads = useQuietThreadShells();

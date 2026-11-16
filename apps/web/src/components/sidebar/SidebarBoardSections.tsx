@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { AuthOrchestrationOperateScope, type EnvironmentId } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { useSidebarHostFilter } from "../../sidebarHostFilter";
 import { useStartProjectThread } from "../../hooks/useStartProjectThread";
 import { useProjects } from "../../state/entities";
 import { useEnvironmentsWithScope } from "../../state/session";
@@ -25,7 +25,9 @@ export function SidebarBoardSections() {
   const colors = useEnvironmentColors();
   const projects = useProjects();
   const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
+  const hostFilter = useSidebarHostFilter((state) => state.selected);
+  const selectHost = useSidebarHostFilter((state) => state.select);
+  const selectedEnvironmentId = hostFilter?.environmentId ?? null;
   const starter = useStartProjectThread();
   const selectedEnvironment = environments.find(
     (entry) => entry.environmentId === selectedEnvironmentId,
@@ -93,16 +95,28 @@ export function SidebarBoardSections() {
               ? (colors.get(machine.environmentId) ?? "gray")
               : "gray"
         }
+        selectedHostKey={hostFilter?.key ?? null}
         onProjects={(machine) =>
-          setSelectedEnvironmentId((current) =>
-            current === machine.environmentId ? null : machine.environmentId,
-          )
+          selectHost({ key: machine.key, environmentId: machine.environmentId, name: machine.name })
         }
       />
+      <button
+        type="button"
+        aria-pressed={hostFilter === null}
+        onClick={() => selectHost(null)}
+        className="mt-1 w-full rounded px-1 py-1 text-left text-2xs text-sidebar-muted-foreground hover:bg-sidebar-row-hover"
+      >
+        {hostFilter
+          ? `当前仅看：${hostFilter.name} · 点击显示全部主机`
+          : "全部主机 · 选择一台仅看它的项目"}
+      </button>
+      {hostFilter !== null && selectedEnvironment === undefined ? (
+        <p className="mt-1 text-2xs text-warning">此主机尚未连接 T3 环境；没有可列出的会话项目。</p>
+      ) : null}
       {selectedEnvironment ? (
         <div className="mt-2 border-t border-sidebar-border pt-2" aria-label="选择目标环境项目">
           <div className="mb-1 flex items-center text-2xs text-sidebar-muted-foreground">
-            选项目，点 ＋ 发起对话
+            已筛选此主机；下面为尚未接管的目录
             <button
               type="button"
               onClick={() => openBoard({ env: selectedEnvironment.environmentId })}
@@ -117,39 +131,41 @@ export function SidebarBoardSections() {
             <p className="text-2xs text-warning">当前连接没有发起对话的权限。</p>
           ) : null}
           <div className="max-h-64 overflow-y-auto">
-            {[...candidates.values()].map((project) => (
-              <div key={project.path} className="flex items-center gap-1 py-1">
-                <EnvironmentColorDot
-                  color={colors.get(selectedEnvironment.environmentId) ?? "gray"}
-                />
-                <span className="min-w-0 flex-1 truncate text-2xs">{project.title}</span>
-                {project.scanned ? (
-                  <span className="text-3xs text-sidebar-muted-foreground">未接管</span>
-                ) : null}
-                <button
-                  type="button"
-                  aria-label={`在 ${project.title} 发起远程对话`}
-                  disabled={
-                    starter.busy ||
-                    selectedEnvironment.connection.phase !== "connected" ||
-                    !operable.has(selectedEnvironment.environmentId)
-                  }
-                  onClick={() => {
-                    void starter
-                      .start(selectedEnvironment.environmentId, project.path)
-                      .then((opened) => {
-                        if (opened && isMobile) setOpenMobile(false);
-                      });
-                  }}
-                  className="grid size-6 shrink-0 place-items-center rounded hover:bg-sidebar-row-hover disabled:opacity-40"
-                >
-                  ＋
-                </button>
-              </div>
-            ))}
-            {candidates.size === 0 ? (
+            {[...candidates.values()]
+              .filter((project) => project.scanned)
+              .map((project) => (
+                <div key={project.path} className="flex items-center gap-1 py-1">
+                  <EnvironmentColorDot
+                    color={colors.get(selectedEnvironment.environmentId) ?? "gray"}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-2xs">{project.title}</span>
+                  {project.scanned ? (
+                    <span className="text-3xs text-sidebar-muted-foreground">未接管</span>
+                  ) : null}
+                  <button
+                    type="button"
+                    aria-label={`在 ${project.title} 发起远程对话`}
+                    disabled={
+                      starter.busy ||
+                      selectedEnvironment.connection.phase !== "connected" ||
+                      !operable.has(selectedEnvironment.environmentId)
+                    }
+                    onClick={() => {
+                      void starter
+                        .start(selectedEnvironment.environmentId, project.path)
+                        .then((opened) => {
+                          if (opened && isMobile) setOpenMobile(false);
+                        });
+                    }}
+                    className="grid size-6 shrink-0 place-items-center rounded hover:bg-sidebar-row-hover disabled:opacity-40"
+                  >
+                    ＋
+                  </button>
+                </div>
+              ))}
+            {[...candidates.values()].every((project) => !project.scanned) ? (
               <p className="py-1 text-2xs text-sidebar-muted-foreground">
-                此环境尚无已登记或已扫描项目。请先在该环境添加项目。
+                已接管项目与对话显示在下方项目树。
               </p>
             ) : null}
           </div>

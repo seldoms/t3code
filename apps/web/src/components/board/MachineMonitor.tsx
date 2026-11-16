@@ -36,7 +36,9 @@ function MachineRow({
   color,
   single,
   onProjects,
+  selected,
 }: {
+  selected: boolean;
   machine: MonitoredMachine;
   color: MachineColor;
   single: boolean;
@@ -81,14 +83,15 @@ function MachineRow({
             </span>
           ) : null}
         </button>
-        {onProjects && machine.environmentId ? (
+        {onProjects ? (
           <button
             type="button"
             aria-label={`查看 ${machine.name} 的项目并发起对话`}
             onClick={() => onProjects(machine)}
+            aria-pressed={selected}
             className="shrink-0 rounded px-1 py-0.5 text-3xs text-muted-foreground hover:bg-muted"
           >
-            项目
+            {selected ? "已选" : "项目"}
           </button>
         ) : null}
       </div>
@@ -117,7 +120,9 @@ export function MachineMonitor({
   machines,
   colorFor,
   onProjects,
+  selectedHostKey = null,
 }: {
+  selectedHostKey?: string | null;
   machines: ReadonlyArray<MonitoredMachine>;
   colorFor: (machine: MonitoredMachine) => MachineColor;
   onProjects?: ((machine: MonitoredMachine) => void) | undefined;
@@ -142,6 +147,7 @@ export function MachineMonitor({
           color={colorFor(machine)}
           single={machines.length === 1}
           onProjects={onProjects}
+          selected={selectedHostKey === machine.key}
         />
       ))}
     </div>
