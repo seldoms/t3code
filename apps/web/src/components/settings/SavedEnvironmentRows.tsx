@@ -27,7 +27,7 @@ import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
-import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
+import { EnvironmentColorMenu, EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { EnvironmentRoutesList } from "./EnvironmentRoutesList";
 import {
   ConnectionDiagnosisPanel,
@@ -407,6 +407,10 @@ export function SavedBackendListRow({
           <EllipsisIcon className="size-3.5" />
         </MenuTrigger>
         <MenuPopup align="end">
+          <EnvironmentColorMenu
+            environmentId={environmentId}
+            serverConfig={environment.serverConfig}
+          />
           <EnvironmentIconMenu
             environmentId={environmentId}
             serverConfig={environment.serverConfig}

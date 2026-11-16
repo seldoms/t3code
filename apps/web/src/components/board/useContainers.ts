@@ -14,11 +14,34 @@ export interface ContainerEntry {
   readonly stack: string | null;
 }
 
+/** 一台 Docker 主机（Portainer endpoint）的容器集合。 */
+export interface HostContainers {
+  readonly endpointId: number;
+  readonly name: string;
+  readonly online: boolean;
+  readonly error?: string;
+  readonly containers: ReadonlyArray<ContainerEntry>;
+}
+
 export interface ContainersSnapshot {
   readonly configured: boolean;
   readonly error?: string;
   readonly url?: string;
-  readonly containers: ReadonlyArray<ContainerEntry>;
+  readonly hosts: ReadonlyArray<HostContainers>;
+}
+
+export interface ImageEntry {
+  readonly id: string;
+  readonly tags: ReadonlyArray<string>;
+  readonly sizeBytes: number;
+  readonly created: number;
+  readonly containers: number;
+}
+
+export interface ImagesSnapshot {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly images: ReadonlyArray<ImageEntry>;
 }
 
 const REFRESH_MS = 15_000;
@@ -31,7 +54,15 @@ function endpoint(): string {
   }
 }
 
-/** 每 15 秒读一次容器列表（Portainer 只读接口），返回快照和手动刷新。 */
+function imagesEndpoint(endpointId: number): string {
+  try {
+    return resolvePrimaryEnvironmentHttpUrl(`/api/integrations/images?endpointId=${endpointId}`);
+  } catch {
+    return `/api/integrations/images?endpointId=${endpointId}`;
+  }
+}
+
+/** 每 15 秒读一次容器列表（按主机分组），返回快照和手动刷新。 */
 export function useContainers(): {
   snapshot: ContainersSnapshot | null;
   refresh: () => void;
@@ -65,10 +96,23 @@ export function useContainers(): {
   return { snapshot, refresh: () => void loadRef.current() };
 }
 
-export type ContainerAction = "start" | "stop" | "restart";
+/** 按需拉一台主机的镜像列表（不轮询，点开主机时取）。 */
+export async function fetchImages(endpointId: number): Promise<ImagesSnapshot | null> {
+  try {
+    const response = await primaryRawFetch(imagesEndpoint(endpointId));
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    return typeof body === "object" && body !== null ? (body as ImagesSnapshot) : null;
+  } catch {
+    return null;
+  }
+}
 
-/** 容器写操作：服务端只监听回环，页面负责二次确认。 */
+export type ContainerAction = "start" | "stop" | "restart" | "remove";
+
+/** 容器写操作：服务端只监听回环，页面负责二次确认；删除仅限已停止的容器。 */
 export async function runContainerAction(
+  endpointId: number,
   id: string,
   action: ContainerAction,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -76,7 +120,7 @@ export async function runContainerAction(
     const response = await primaryRawFetch(`${endpoint()}/action`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, action }),
+      body: JSON.stringify({ endpointId, id, action }),
     });
     return (await response.json()) as { ok: boolean; error?: string };
   } catch (cause) {
@@ -86,14 +130,33 @@ export async function runContainerAction(
 
 /** 读容器最近 tail 行日志。 */
 export async function fetchContainerLogs(
+  endpointId: number,
   id: string,
   tail = 200,
 ): Promise<{ ok: boolean; error?: string; logs?: string }> {
   try {
     const response = await primaryRawFetch(
-      `${endpoint()}/logs?id=${encodeURIComponent(id)}&tail=${tail}`,
+      `${endpoint()}/logs?endpointId=${endpointId}&id=${encodeURIComponent(id)}&tail=${tail}`,
     );
     return (await response.json()) as { ok: boolean; error?: string; logs?: string };
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : "fetch-failed" };
+  }
+}
+
+/** 删除镜像：被容器引用时 Docker 409，如实报错。 */
+export async function removeImage(
+  endpointId: number,
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const base = imagesEndpoint(endpointId).split("?")[0];
+    const response = await primaryRawFetch(`${base}/action`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpointId, id, action: "remove" }),
+    });
+    return (await response.json()) as { ok: boolean; error?: string };
   } catch (cause) {
     return { ok: false, error: cause instanceof Error ? cause.message : "fetch-failed" };
   }

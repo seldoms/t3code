@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { AcpRegistryUrlAuthAction } from "./acpRegistry.ts";
 import {
+  type EnvironmentColorKind,
   type EnvironmentMachineKind,
   ExecutionEnvironmentDescriptor,
   ServerSelfUpdateMethod,
@@ -755,12 +756,30 @@ export const ServerConfig = Schema.Struct({
 export type ServerConfig = typeof ServerConfig.Type;
 
 export function resolveEnvironmentMachineKind(
-  config: {
-    readonly environment: Pick<ExecutionEnvironmentDescriptor, "platform">;
-    readonly settings?: Pick<ServerSettings, "environmentIcon">;
-  } | null,
+  config:
+    | {
+        readonly environment: Pick<ExecutionEnvironmentDescriptor, "platform">;
+        readonly settings?: Pick<ServerSettings, "environmentIcon"> | null;
+      }
+    | null
+    | undefined,
 ): EnvironmentMachineKind {
   return config?.settings?.environmentIcon ?? config?.environment.platform.machine ?? "server";
+}
+
+/**
+ * 机器标识色：设置里选了就用；没选返回 null（展示层本地回退绿、远程回退灰）。
+ * 「是否本机」由调用方判断，这里只读设置。
+ */
+export function resolveEnvironmentColorKind(
+  config:
+    | {
+        readonly settings?: Pick<ServerSettings, "environmentColor"> | null;
+      }
+    | null
+    | undefined,
+): EnvironmentColorKind | null {
+  return config?.settings?.environmentColor ?? null;
 }
 
 const ServerUpsertKeybindingReplaceTarget = Schema.Struct({

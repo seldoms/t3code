@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import { AuthOrchestrationOperateScope, EnvironmentId } from "@t3tools/contracts";
+import { useStartProjectThread } from "../../hooks/useStartProjectThread";
+import { useEnvironmentsWithScope } from "../../state/session";
+import { resolveSnapshotEnvironment } from "./projectThreadTarget";
+import { useEnvironmentColors } from "../../environmentColors";
+import { EnvironmentColorDot } from "../EnvironmentColorDot";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { ChevronDownIcon, ChevronRightIcon, LayoutGridIcon, Rows3Icon } from "lucide-react";
+import { LayoutGridIcon, Rows3Icon } from "lucide-react";
+import { MachineMonitor } from "./MachineMonitor";
+import { BoardWorkspace } from "./BoardWorkspace";
+import { useMachineMonitor } from "../../hooks/useMachineMonitor";
 import { inferProjectTitleFromPath } from "@t3tools/client-runtime/state/projects";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 
 import { newProjectId } from "../../lib/utils";
 import { projectEnvironment } from "../../state/projects";
@@ -11,7 +19,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { useNowMinute } from "../../hooks/useNowMinute";
-import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useClientSettings } from "../../hooks/useSettings";
 import {
   BOARD_STAGES,
@@ -60,6 +67,7 @@ interface CardModel {
   readonly projectId: string | null;
   readonly environmentId: string | null;
   readonly title: string;
+  readonly machineColor: import("../../environmentColors").MachineColor;
   readonly machineId: string;
   readonly machineLabel: string;
   readonly machineOnline: boolean;
@@ -84,7 +92,7 @@ interface CardModel {
   readonly lastCommitSubject: string | null;
   /** 采集器里有、T3 里没接管：只能看，不能开会话。 */
   readonly external: boolean;
-  /** 来自远端机器的快照：路径不在本机，不能在本机接管。 */
+  /** 远端快照必须绑定对应 T3 环境，禁止把路径发给本机。 */
   readonly remote: boolean;
   /** 扫描到的目录最近 7 天有活动的 agent。 */
   readonly agents: ReadonlyArray<string>;
@@ -153,11 +161,23 @@ export function BoardPage() {
   const threads = useThreadShells();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const starter = useStartProjectThread();
+  const operable = useEnvironmentsWithScope(environments, AuthOrchestrationOperateScope);
   const projwall = useProjwallLatest();
   const hostMetrics = useHostMetrics();
+  const environmentColors = useEnvironmentColors();
+  const snapshotColor = (label: string): import("../../environmentColors").MachineColor => {
+    const env = environments.find(
+      (entry) => shortHost(entry.label).toLowerCase() === shortHost(label).toLowerCase(),
+    );
+    if (env) return environmentColors.get(env.environmentId) ?? "gray";
+    const index = projwall.remotes.findIndex((entry) => entry.label === label);
+    return (
+      (["blue", "orange", "purple", "cyan", "pink", "yellow", "red"] as const)[index] ?? "gray"
+    );
+  };
   const navigate = useNavigate();
   const search = boardRoute.useSearch();
-  const handleNewThread = useNewThreadHandler();
   const boardPrefs = useClientSettings();
   // 分钟级时钟：相对时间只需要分钟精度，避免整块板每秒重渲染。
   const now = Date.parse(useNowMinute());
@@ -214,7 +234,7 @@ export function BoardPage() {
   const cardContextMenu = (card: CardModel) => async (event: React.MouseEvent) => {
     const choice = await showAppContextMenu(event, [
       { id: "open", label: "查看详情" },
-      ...(card.external ? [] : [{ id: "new-thread", label: "发起对话" }]),
+      { id: "new-thread", label: card.external ? "接管并发起对话" : "发起对话" },
       { id: "copy", label: "复制路径" },
       ...(card.projectId && card.environmentId
         ? [
@@ -239,8 +259,11 @@ export function BoardPage() {
     if (choice === null) return;
     if (choice === "open") selectCard(card.key);
     else if (choice === "copy") void copyText(card.path);
-    else if (choice === "new-thread" && card.projectId && card.environmentId) {
-      void handleNewThread(scopeProjectRef(card.environmentId as never, card.projectId as never));
+    else if (choice === "new-thread") {
+      void starter.start(
+        card.environmentId ? EnvironmentId.make(card.environmentId) : null,
+        card.path,
+      );
     } else if (choice.startsWith("stage:") && card.projectId && card.environmentId) {
       const stage = choice.slice("stage:".length);
       setStage(card.projectId, card.environmentId, stage === "auto" ? null : (stage as BoardStage));
@@ -315,6 +338,7 @@ export function BoardPage() {
       environmentId: String(project.environmentId),
       title: project.title,
       machineId,
+      machineColor: environmentColors.get(project.environmentId) ?? "gray",
       machineLabel: isLocal ? shortHost(hostMetrics?.host ?? "本机") : machineId,
       machineOnline: isLocal || (envOnline.get(String(project.environmentId)) ?? false),
       path,
@@ -349,9 +373,10 @@ export function BoardPage() {
     cards.push({
       key: `pw:${path}`,
       projectId: null,
-      environmentId: null,
+      environmentId: primaryEnvironmentId,
       title: project.name,
       machineId: "local",
+      machineColor: "green",
       machineLabel: localLabel,
       machineOnline: true,
       path,
@@ -378,6 +403,7 @@ export function BoardPage() {
   // 远端机器拉回来的快照：同样只读展示，但不能在本机接管。
   for (const remote of projwall.remotes) {
     const machineId = remoteMachineId(remote.machine, remote.label);
+    const sourceEnvironmentId = resolveSnapshotEnvironment(environments, remote);
     for (const project of remote.projects) {
       const path = normalisePath(project.path);
       if (!path.startsWith("/")) continue;
@@ -386,9 +412,10 @@ export function BoardPage() {
       cards.push({
         key: `pwr:${remote.machine}:${path}`,
         projectId: null,
-        environmentId: null,
+        environmentId: sourceEnvironmentId,
         title: project.name,
         machineId,
+        machineColor: snapshotColor(remote.label),
         machineLabel: remote.label,
         machineOnline: true,
         path,
@@ -604,7 +631,7 @@ export function BoardPage() {
         };
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
+    <BoardWorkspace>
       <header className="drag-region flex flex-none flex-wrap select-none items-center gap-3 border-b border-border px-4 py-2.5">
         <div className="flex items-baseline gap-2">
           <h1 className="text-sm font-semibold tracking-tight">项目板</h1>
@@ -612,7 +639,7 @@ export function BoardPage() {
             {cards.length} 个项目 · {totalThreads} 个会话
           </span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-md border border-border">
             {(["board", "table"] as const).map((mode) => (
               <button
@@ -645,7 +672,7 @@ export function BoardPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索项目 / 路径"
-            className="h-7 w-52 rounded-md border border-border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+            className="h-7 w-52 max-w-full rounded-md border border-border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
           />
           <button
             type="button"
@@ -790,7 +817,7 @@ export function BoardPage() {
         </div>
       ) : null}
 
-      <HostStrip metrics={hostMetrics} scannedAt={projwall.available ? projwall.scannedAt : null} />
+      <HostStrip scannedAt={projwall.available ? projwall.scannedAt : null} />
 
       {view === "board" ? (
         <div
@@ -861,7 +888,7 @@ export function BoardPage() {
             return (
               <section
                 key={stage.id}
-                className="flex w-[272px] flex-none flex-col"
+                className="flex min-w-[240px] flex-1 basis-[272px] flex-col"
                 onDragOver={(event) => {
                   if (!dragging) return;
                   event.preventDefault();
@@ -975,8 +1002,17 @@ export function BoardPage() {
         <BoardDrawer
           card={selected}
           now={now}
-          adopting={adopting === selected.path}
-          adoptError={adoptError}
+          adopting={adopting === selected.path || starter.busy}
+          adoptError={starter.error ?? adoptError}
+          canStart={
+            selected.environmentId !== null &&
+            operable.has(EnvironmentId.make(selected.environmentId)) &&
+            environments.some(
+              (entry) =>
+                entry.environmentId === selected.environmentId &&
+                entry.connection.phase === "connected",
+            )
+          }
           canAdopt={writableEnvironment !== null}
           onAdopt={() => void adoptPath(selected.path, null)}
           onStage={(stage) => {
@@ -987,11 +1023,10 @@ export function BoardPage() {
           onOpenThread={openThread}
           onClose={() => selectCard(null)}
           onNewThread={() => {
-            if (selected.projectId && selected.environmentId) {
-              void handleNewThread(
-                scopeProjectRef(selected.environmentId as never, selected.projectId as never),
-              );
-            }
+            void starter.start(
+              selected.environmentId ? EnvironmentId.make(selected.environmentId) : null,
+              selected.path,
+            );
           }}
         />
       ) : null}
@@ -1008,7 +1043,7 @@ export function BoardPage() {
           }}
         />
       ) : null}
-    </div>
+    </BoardWorkspace>
   );
 }
 
@@ -1088,13 +1123,8 @@ function BoardCard({
         onContextMenu={onContextMenu}
         className={`${base}${skin} ${selectedSkin} flex cursor-pointer items-center gap-1.5 px-2 py-1 ${flat ? "" : "rounded-md"}`}
       >
+        <EnvironmentColorDot color={card.machineColor} />
         <span className="min-w-0 flex-1 truncate text-2xs text-foreground/90">{card.title}</span>
-        {card.machineId !== "local" ? (
-          <span className="flex flex-none items-center gap-1 text-3xs text-muted-foreground">
-            <MachineDot online={card.machineOnline} />
-            {card.machineLabel}
-          </span>
-        ) : null}
         <span className="flex-none text-3xs tabular-nums text-muted-foreground/70">
           {boardRelativeTime(card.lastActiveAt, now)}
         </span>
@@ -1113,6 +1143,7 @@ function BoardCard({
         <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-warning" />
       ) : null}
       <div className="flex items-start gap-1.5">
+        <EnvironmentColorDot color={card.machineColor} className="mt-1" />
         <span className="line-clamp-2 text-xs font-medium leading-snug">{card.title}</span>
         {card.external ? (
           <span className="ml-auto flex-none rounded bg-muted px-1 text-3xs text-muted-foreground">
@@ -1142,10 +1173,6 @@ function BoardCard({
         ) : null}
       </div>
       <div className="mt-1 flex items-center gap-1.5 text-2xs text-muted-foreground">
-        <span className="flex min-w-0 items-center gap-1">
-          <MachineDot online={card.machineOnline} local={card.machineId === "local"} />
-          <span className="truncate">{shortMachineName(card.machineLabel)}</span>
-        </span>
         {card.branch !== null ? (
           <span className="max-w-24 truncate font-mono text-3xs opacity-80">{card.branch}</span>
         ) : null}
@@ -1249,7 +1276,10 @@ function BoardTable({
                 className={`cursor-pointer border-b border-border/50 hover:bg-muted/50 ${selectedKey === card.key ? "bg-accent" : ""}`}
               >
                 <td className="max-w-72 px-2 py-1.5">
-                  <div className="truncate font-medium">{card.title}</div>
+                  <div className="flex items-center gap-1.5 truncate font-medium">
+                    <EnvironmentColorDot color={card.machineColor} />
+                    {card.title}
+                  </div>
                   <div className="truncate font-mono text-3xs text-muted-foreground/70">
                     {card.path}
                   </div>
@@ -1262,8 +1292,7 @@ function BoardTable({
                 </td>
                 <td className="px-2 py-1.5">
                   <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-                    <MachineDot online={card.machineOnline} />
-                    {card.machineLabel}
+                    <EnvironmentColorDot color={card.machineColor} />
                   </span>
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -1301,6 +1330,7 @@ function BoardDrawer({
   adopting,
   adoptError,
   canAdopt,
+  canStart,
   onAdopt,
   onStage,
   onOpenThread,
@@ -1312,6 +1342,7 @@ function BoardDrawer({
   adopting: boolean;
   adoptError: string | null;
   canAdopt: boolean;
+  canStart: boolean;
   onAdopt: () => void;
   onStage: (stage: BoardStage | null) => void;
   onOpenThread: (environmentId: string, threadId: string) => void;
@@ -1320,11 +1351,9 @@ function BoardDrawer({
 }) {
   const stage = BOARD_STAGES.find((entry) => entry.id === card.stage);
   return (
-    <aside className="absolute inset-y-0 right-0 z-30 flex w-[360px] flex-col border-l border-border bg-background shadow-2xl">
+    <aside className="absolute inset-y-0 right-0 z-30 flex w-[360px] max-w-full flex-col border-l border-border bg-background shadow-2xl">
       <div className="flex flex-none items-center gap-2 border-b border-border px-4 py-2.5">
-        <span className="text-2xs text-muted-foreground">
-          {shortMachineName(card.machineLabel)} <span className="opacity-50">/</span> {stage?.name}
-        </span>
+        <span className="text-2xs text-muted-foreground">{stage?.name}</span>
         <button
           type="button"
           onClick={onClose}
@@ -1335,12 +1364,14 @@ function BoardDrawer({
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <h2 className="text-sm font-semibold leading-snug">{card.title}</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold leading-snug">
+          <EnvironmentColorDot color={card.machineColor} />
+          {card.title}
+        </h2>
         <div className="mt-1 break-all font-mono text-3xs text-muted-foreground">{card.path}</div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <MachineDot online={card.machineOnline} local={card.machineId === "local"} />
-            {shortMachineName(card.machineLabel)}
+            <EnvironmentColorDot color={card.machineColor} />
           </span>
           {card.branch !== null ? <Badge>{card.branch}</Badge> : null}
           {card.dirty ? <Badge tone="approval">有改动</Badge> : null}
@@ -1403,8 +1434,11 @@ function BoardDrawer({
             ) : null}
             {card.remote ? (
               <p className="text-2xs text-muted-foreground">
-                这是 {card.machineLabel}{" "}
-                上的项目，路径不在本机；到那台机器的环境里发起对话即可登记。
+                {card.environmentId === null
+                  ? "未找到唯一对应的 T3 环境。请先在设置 → 环境中连接这台机器。"
+                  : !canStart
+                    ? "目标环境未连接或缺少操作权限。请先检查设置 → 环境。"
+                    : "目录将在对应远程环境登记，对话与 Agent 都运行在那台机器上。"}
               </p>
             ) : (
               <>
@@ -1422,6 +1456,19 @@ function BoardDrawer({
                 ) : null}
               </>
             )}
+            <button
+              type="button"
+              onClick={onNewThread}
+              disabled={adopting || !canStart}
+              className="self-start rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {adopting ? "正在打开…" : "接管并发起对话"}
+            </button>
+            {card.remote && adoptError !== null ? (
+              <p role="alert" className="text-2xs text-warning">
+                {adoptError}
+              </p>
+            ) : null}
           </div>
         ) : card.threads.length === 0 ? (
           <div className="mt-3 flex flex-col gap-2">
@@ -1429,6 +1476,7 @@ function BoardDrawer({
             <button
               type="button"
               onClick={onNewThread}
+              disabled={adopting || !canStart}
               className="self-start rounded-md bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground hover:brightness-110"
             >
               发起对话
@@ -1443,6 +1491,7 @@ function BoardDrawer({
               <button
                 type="button"
                 onClick={onNewThread}
+                disabled={adopting || !canStart}
                 className="ml-auto rounded border border-border px-1.5 py-0.5 text-2xs text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               >
                 + 发起对话
@@ -1545,138 +1594,23 @@ function NewProjectDialog({
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "未知";
-  const gb = bytes / 1_073_741_824;
-  return gb >= 10 ? `${Math.round(gb)} GB` : `${gb.toFixed(1)} GB`;
-}
-
-function toneClass(percent: number, warnAt = 70, critAt = 88): string {
-  if (percent >= critAt) return "bg-error";
-  if (percent >= warnAt) return "bg-warning";
-  return "bg-success";
-}
-
-/** 本机负载条：默认收成一行的摘要，展开看全部仪表 + 远程明细 + 采集时间。 */
-function HostStrip({
-  metrics,
-  scannedAt,
-}: {
-  metrics: ReturnType<typeof useHostMetrics>;
-  scannedAt: string | null;
-}) {
-  const prefs = useClientSettings();
-  const [open, setOpen] = useState(prefs.boardHostStripOpen);
-
-  if (!metrics) {
-    return (
-      <div className="flex-none border-b border-border px-4 py-1.5 text-2xs text-muted-foreground">
-        读取本机负载…
-      </div>
-    );
-  }
-
-  const hours = Math.floor(metrics.uptimeSeconds / 3600);
-  const uptime = hours >= 24 ? `${Math.floor(hours / 24)} 天` : `${hours} 小时`;
-  const remotes = metrics.remotes ?? [];
-  const onlineRemotes = remotes.filter((remote) => remote.online).length;
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="展开机器负载明细"
-        className="flex flex-none items-center gap-3 border-b border-border px-4 py-1 text-2xs text-muted-foreground hover:bg-muted/40"
-      >
-        <ChevronRightIcon className="size-3 flex-none" />
-        <span className="font-medium text-foreground/80">{shortHost(metrics.host)}</span>
-        <span className="tabular-nums">CPU {metrics.cpu ?? "…"}%</span>
-        <span className="tabular-nums">内存 {metrics.memPercent}%</span>
-        <span className="tabular-nums">磁盘 {metrics.diskPercent}%</span>
-        {metrics.gpu !== null ? <span className="tabular-nums">GPU {metrics.gpu}%</span> : null}
-        <span className="ml-auto tabular-nums">
-          远程 {onlineRemotes}/{remotes.length} 在线
-        </span>
-      </button>
-    );
-  }
-
-  const meters: Array<{ label: string; percent: number; detail: string }> = [
-    {
-      label: "CPU",
-      percent: metrics.cpu ?? 0,
-      detail: metrics.cpu === null ? "采样中" : `${metrics.cpu}%`,
-    },
-    {
-      label: "内存",
-      percent: metrics.memPercent,
-      detail: `${metrics.memPercent}% · ${formatBytes(metrics.memUsed)}`,
-    },
-    {
-      label: "磁盘",
-      percent: metrics.diskPercent,
-      detail: `${metrics.diskPercent}% · ${formatBytes(metrics.diskUsed)}`,
-    },
-  ];
-  if (metrics.gpu !== null) {
-    meters.push({ label: "GPU", percent: metrics.gpu, detail: `${metrics.gpu}%` });
-  }
-
+function HostStrip({ scannedAt }: { scannedAt: string | null }) {
+  const colors = useEnvironmentColors();
+  const { machines } = useMachineMonitor();
   return (
-    <div className="flex-none border-b border-border">
-      <div className="flex items-center gap-5 overflow-hidden whitespace-nowrap px-4 py-2">
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="收起机器负载明细"
-          className="flex items-baseline gap-1.5 hover:opacity-80"
-        >
-          <ChevronDownIcon className="size-3 flex-none self-center" />
-          <span className="text-xs font-semibold">{shortHost(metrics.host)}</span>
-          <span className="text-2xs text-muted-foreground">
-            本机 · {metrics.cores} 核 · up {uptime}
-          </span>
-        </button>
-        {meters.map((meter) => (
-          <div key={meter.label} className="flex w-[178px] items-center gap-1.5">
-            <span className="w-[30px] flex-none text-2xs text-muted-foreground">{meter.label}</span>
-            <div className="h-1 w-[72px] flex-none overflow-hidden rounded-full bg-muted">
-              <div
-                className={`h-full rounded-full ${toneClass(meter.percent)}`}
-                style={{ width: `${Math.min(100, Math.max(0, meter.percent))}%` }}
-              />
-            </div>
-            <span className="flex-1 whitespace-nowrap text-2xs tabular-nums text-muted-foreground">
-              {meter.detail}
-            </span>
-          </div>
-        ))}
-        <span className="ml-auto text-2xs tabular-nums text-muted-foreground">
-          负载 {metrics.load.map((value) => value.toFixed(2)).join(" · ")}
-        </span>
-        {remotes.map((remote) => (
-          <span
-            key={remote.host}
-            aria-label={`${remote.host} · ${remote.cores ?? "?"} 核`}
-            className="flex items-center gap-1.5 border-l border-border pl-2.5 text-2xs text-muted-foreground"
-          >
-            <MachineDot online={remote.online} />
-            {shortHost(remote.host)}
-            {remote.online ? (
-              <span className="tabular-nums">
-                内存 {remote.memPercent ?? "?"}% · 磁盘 {remote.diskPercent ?? "?"}%
-              </span>
-            ) : (
-              <span className="text-muted-foreground/60">离线</span>
-            )}
-          </span>
-        ))}
-      </div>
-      {scannedAt !== null ? (
-        <div className="px-4 pb-1 text-3xs text-muted-foreground/60">
-          项目快照采集于 {scannedAt}
-        </div>
+    <div className="max-h-[35vh] shrink-0 overflow-y-auto border-b border-border px-4 py-1.5">
+      <MachineMonitor
+        machines={machines}
+        colorFor={(machine) =>
+          machine.local
+            ? "green"
+            : machine.environmentId
+              ? (colors.get(machine.environmentId) ?? "gray")
+              : "gray"
+        }
+      />
+      {scannedAt ? (
+        <p className="mt-1 text-3xs text-muted-foreground/60">项目快照采集于 {scannedAt}</p>
       ) : null}
     </div>
   );

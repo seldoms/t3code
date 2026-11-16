@@ -26,7 +26,12 @@ import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import { UsageModelFilter } from "./usage.ts";
 import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
 import { SettingsSecretValue } from "./settingsSecretValue.ts";
-import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
+import {
+  EnvironmentColorKind,
+  EnvironmentMachineKind,
+  ThreadEnvMode,
+  WorktreeSubmodules,
+} from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
   CustomModelSetting,
@@ -582,7 +587,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // A locale code or "system". Open string so new locales and downgrades need no migration.
   language: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("zh"))),
   // 项目板与侧边栏的展示偏好（个人魔改，见 docs/internals/board-spec.md）。
-  boardSidebarDirs: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  sidebarDisplayMode: Schema.Literals(["threads", "projects", "project-threads"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("project-threads" as const)),
+  ),
+  boardSidebarDirs: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardSidebarMachineLoad: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardDefaultView: Schema.Literals(["board", "table"]).pipe(
     Schema.withDecodingDefault(Effect.succeed("board" as const)),
@@ -1519,6 +1527,10 @@ export const ServerSettings = Schema.Struct({
   environmentIcon: ForwardCompatibleNullable(EnvironmentMachineKind).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** Null = 未设置；展示层本地默认绿，远程机器默认灰点。 */
+  environmentColor: ForwardCompatibleNullable(EnvironmentColorKind).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   /** Null inherits t3.json, then local; omit it on the wire for older clients requiring a literal. */
   defaultThreadEnvMode: OmittedWhenNull(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
@@ -1932,6 +1944,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultAppearance: Schema.optionalKey(DefaultAppearancePreference),
   defaultAppearanceSetAt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
   environmentIcon: Schema.optionalKey(Schema.NullOr(EnvironmentMachineKind)),
+  environmentColor: Schema.optionalKey(Schema.NullOr(EnvironmentColorKind)),
   defaultThreadEnvMode: Schema.optionalKey(Schema.NullOr(ThreadEnvMode)),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
@@ -2128,6 +2141,9 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
+  sidebarDisplayMode: Schema.optionalKey(
+    Schema.Literals(["threads", "projects", "project-threads"]),
+  ),
   boardSidebarDirs: Schema.optionalKey(Schema.Boolean),
   boardSidebarMachineLoad: Schema.optionalKey(Schema.Boolean),
   boardDefaultView: Schema.optionalKey(Schema.Literals(["board", "table"])),

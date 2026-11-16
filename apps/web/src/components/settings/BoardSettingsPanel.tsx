@@ -15,8 +15,37 @@ export function BoardSettingsPanel() {
       <SettingsSection title="侧边栏">
         <SettingsRow
           devicePreference
-          title="显示业务目录"
-          description="把扫描到的项目按父目录聚合，点击按目录过滤项目板。"
+          title="默认显示方式"
+          description="监控独立放在顶部；下面选择对话列表、项目列表，或展开项目查看对话。项目旁的加号创建新对话。"
+          control={
+            <Select
+              value={settings.sidebarDisplayMode}
+              onValueChange={(value) => {
+                if (value === "threads" || value === "projects" || value === "project-threads")
+                  update({ sidebarDisplayMode: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="侧栏显示方式">
+                <SelectValue>
+                  {settings.sidebarDisplayMode === "threads"
+                    ? "对话"
+                    : settings.sidebarDisplayMode === "projects"
+                      ? "项目"
+                      : "项目展开对话"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="threads">对话</SelectItem>
+                <SelectItem value="projects">项目</SelectItem>
+                <SelectItem value="project-threads">项目展开对话</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          devicePreference
+          title="显示目录快捷筛选"
+          description="可选的高级筛选入口，不再与项目、对话混排。"
           control={
             <Switch
               checked={settings.boardSidebarDirs}
@@ -25,18 +54,9 @@ export function BoardSettingsPanel() {
             />
           }
         />
-        <SettingsRow
-          devicePreference
-          title="机器行显示负载"
-          description="在本机和远程机器行下显示 CPU / 内存摘要，不用展开就能扫一眼状态。"
-          control={
-            <Switch
-              checked={settings.boardSidebarMachineLoad}
-              onCheckedChange={(checked) => update({ boardSidebarMachineLoad: checked })}
-              aria-label="机器行显示负载"
-            />
-          }
-        />
+        <p className="px-3 py-2 text-xs text-muted-foreground">
+          机器负载始终显示。单机默认展开，多机默认每台一行；点击主机名查看 CPU、内存和硬盘进度条。
+        </p>
       </SettingsSection>
 
       <SettingsSection title="看板">
@@ -82,18 +102,6 @@ export function BoardSettingsPanel() {
                 <SelectItem value="flat">分隔线</SelectItem>
               </SelectPopup>
             </Select>
-          }
-        />
-        <SettingsRow
-          devicePreference
-          title="负载条默认展开"
-          description="收起时只显示一行本机摘要，展开看全部仪表和远程机器明细。"
-          control={
-            <Switch
-              checked={settings.boardHostStripOpen}
-              onCheckedChange={(checked) => update({ boardHostStripOpen: checked })}
-              aria-label="负载条默认展开"
-            />
           }
         />
         <SettingsRow

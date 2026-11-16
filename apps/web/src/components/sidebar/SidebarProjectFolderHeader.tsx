@@ -1,6 +1,8 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ChevronDownIcon, SquarePenIcon } from "lucide-react";
+import { ArchiveIcon, ChevronDownIcon, PinIcon, PlusIcon } from "lucide-react";
+import { useEnvironmentColors } from "../../environmentColors";
+import { EnvironmentColorDot } from "../EnvironmentColorDot";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
@@ -41,9 +43,12 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
   hiddenThreads: readonly EnvironmentThreadShell[];
   onToggle: (group: SidebarProjectSnapshot) => void;
   onNewThread: (group: SidebarProjectSnapshot) => void;
+  onPin?: ((group: SidebarProjectSnapshot) => void) | undefined;
+  onArchive?: ((group: SidebarProjectSnapshot) => void) | undefined;
   onContextMenu: (group: SidebarProjectSnapshot, position: { x: number; y: number }) => void;
 }) {
   const { group, collapsed, hiddenThreads } = props;
+  const colors = useEnvironmentColors();
   const rowId = sidebarFolderRowId(group.projectKey);
   const localLastVisitedAtById = useUiStateStore((state) => state.threadLastVisitedAtById);
   const dot = collapsed
@@ -62,7 +67,7 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
   return (
     <li
       data-testid="sidebar-project-folder"
-      className="group/project-folder relative mt-2 list-none first:mt-0"
+      className="group/project-folder relative mt-2 select-none list-none first:mt-0"
     >
       <button
         type="button"
@@ -76,7 +81,8 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
         className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-(--control-radius) px-(--sidebar-row-content-inset) text-left outline-none hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <ProjectFavicon project={group} className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-sidebar-foreground/90">
+        <EnvironmentColorDot color={colors.get(group.environmentId) ?? "gray"} />
+        <span className="min-w-0 flex-1 truncate pr-20 text-sm font-medium text-sidebar-foreground/90">
           {group.displayName}
         </span>
         {dot ? (
@@ -98,7 +104,27 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
         />
       </button>
       {/* Sits over the count, which hides on hover or focus, and left of the chevron. */}
-      <span className="absolute inset-y-0 right-6 flex items-center opacity-0 focus-within:opacity-100 group-hover/project-folder:opacity-100 pointer-coarse:opacity-100">
+      <span className="absolute inset-y-0 right-6 flex items-center bg-sidebar">
+        {props.onPin ? (
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={group.pinned ? "取消置顶项目" : "置顶项目"}
+            onClick={() => props.onPin?.(group)}
+          >
+            <PinIcon className={group.pinned ? "fill-current" : undefined} />
+          </Button>
+        ) : null}
+        {props.onArchive ? (
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label="屏蔽项目"
+            onClick={() => props.onArchive?.(group)}
+          >
+            <ArchiveIcon />
+          </Button>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -106,14 +132,14 @@ export const SidebarProjectFolderHeader = memo(function SidebarProjectFolderHead
                 data-sidebar-action-for={rowId}
                 size="icon-xs"
                 variant="ghost-muted"
-                aria-label={`New thread in ${group.displayName}`}
+                aria-label={`在 ${group.displayName} 新建对话`}
                 onClick={() => props.onNewThread(group)}
               />
             }
           >
-            <SquarePenIcon aria-hidden />
+            <PlusIcon aria-hidden />
           </TooltipTrigger>
-          <TooltipPopup>New thread in {group.displayName}</TooltipPopup>
+          <TooltipPopup>在 {group.displayName} 新建对话</TooltipPopup>
         </Tooltip>
       </span>
     </li>

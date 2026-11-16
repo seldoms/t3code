@@ -42,7 +42,7 @@ import { ManagedByOrganization } from "../ManagedPolicy";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
-import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
+import { EnvironmentColorMenu, EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
 import { usePeerLinkHosts } from "~/state/peerLinks";
@@ -1229,6 +1229,10 @@ function ConnectionsSettingsContent({
                     <EllipsisIcon className="size-3.5" />
                   </MenuTrigger>
                   <MenuPopup align="end">
+                    <EnvironmentColorMenu
+                      environmentId={accessEnvironmentId}
+                      serverConfig={accessServerConfig}
+                    />
                     <EnvironmentIconMenu
                       environmentId={accessEnvironmentId}
                       serverConfig={accessServerConfig}

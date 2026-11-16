@@ -209,6 +209,13 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
+## Local fork monitoring
+
+- Board and container route roots must fill the flex app shell; reuse `components/board/BoardWorkspace.tsx` for the board. Verify wide and narrow layout captures before packaging.
+- Machine monitoring is shared by sidebar and board. Identity color is not connectivity; distinguish T3 connection from SSH reachability. Single-machine details default open, multiple machines default compact. Unknown metrics stay unknown.
+- Connected environments use existing authenticated host-resources RPC and read-only metrics endpoints; never add production SSH targets to the private-host scanner to fill missing metrics.
+- `components/board/MachineMonitor.browser.test.tsx` and `BoardPage.layout.browser.test.tsx` verify expansion and width behavior.
+
 ## Additional tips
 
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.

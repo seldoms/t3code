@@ -1,7 +1,8 @@
 import type { EnvironmentId, EnvironmentMachineKind } from "@t3tools/contracts";
 
 import type { SidebarProjectSnapshot } from "~/sidebarProjectGrouping";
-import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { EnvironmentColorDot } from "./EnvironmentColorDot";
+import { useEnvironmentColors } from "../environmentColors";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 export function ProjectEnvironmentBadge(props: {
@@ -9,6 +10,7 @@ export function ProjectEnvironmentBadge(props: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly machineByEnvironmentId: ReadonlyMap<EnvironmentId, EnvironmentMachineKind>;
 }) {
+  const colors = useEnvironmentColors();
   const remoteMembers = props.group.memberProjects
     .filter((member) => member.environmentId !== props.primaryEnvironmentId)
     .map((member) => ({ ...member, environmentLabel: member.environmentLabel ?? "Remote" }))
@@ -32,11 +34,7 @@ export function ProjectEnvironmentBadge(props: {
           />
         }
       >
-        <EnvironmentMachineIcon
-          aria-hidden
-          kind={props.machineByEnvironmentId.get(first.environmentId) ?? "server"}
-          className="size-3.5"
-        />
+        <EnvironmentColorDot color={colors.get(first.environmentId) ?? "gray"} />
       </TooltipTrigger>
       <TooltipPopup side="top">{description}</TooltipPopup>
     </Tooltip>

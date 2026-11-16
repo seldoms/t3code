@@ -6,10 +6,13 @@ import { primaryRawFetch } from "../../environments/primary/rawFetch";
 export interface RemoteHostSnapshot {
   readonly host: string;
   readonly online: boolean;
+  readonly alias?: string;
+  readonly cpu?: number | null;
+  readonly error?: string;
   readonly cores?: number;
   readonly load?: readonly [number, number, number];
-  readonly memPercent?: number;
-  readonly diskPercent?: number;
+  readonly memPercent?: number | null;
+  readonly diskPercent?: number | null;
   readonly gpu?: number | null;
 }
 

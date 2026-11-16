@@ -850,6 +850,8 @@ const layerMakeRoutes = Layer.mergeAll(
     IntegrationsHttp.layerIntegrationsRoute,
     IntegrationsHttp.layerContainerActionRoute,
     IntegrationsHttp.layerContainerLogsRoute,
+    IntegrationsHttp.layerImagesRoute,
+    IntegrationsHttp.layerImageActionRoute,
     GuestHttp.layer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,

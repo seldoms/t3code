@@ -127,7 +127,7 @@ import {
 } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
-import { useProjectPin } from "../hooks/useProjectGroupUpdate";
+import { useProjectGroupUpdate, useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -978,7 +978,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       );
     },
   });
-  const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
+  const sidebarDisplayMode = useClientSettings((settings) => settings.sidebarDisplayMode);
+  const boringSidebarEnabled = sidebarDisplayMode === "project-threads";
+  const { updateProjectGroup } = useProjectGroupUpdate();
+  const archiveProject = (group: SidebarProjectSnapshot) => {
+    void updateProjectGroup(
+      group.memberProjects,
+      { archived: !group.archived },
+      group.archived ? "恢复项目失败" : "屏蔽项目失败",
+    );
+  };
   const folderRowsMultiline = useClientSettings((settings) => settings.boringSidebarMultilineRows);
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
@@ -1263,6 +1272,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                       : { id: "pin", label: "Pin project", icon: "pin" },
                   ]
                 : []),
+              ...(canPinProject(group)
+                ? [
+                    {
+                      id: "archive",
+                      label: group.archived ? "恢复项目" : "屏蔽项目（保留文件和对话）",
+                    },
+                  ]
+                : []),
               { id: "project-settings", label: "Project settings", icon: "settings" },
             ],
             position,
@@ -1279,6 +1296,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           case "pin":
           case "unpin":
             setProjectGroupPinned(group, clicked.value === "pin");
+            return;
+          case "archive":
+            archiveProject(group);
             return;
           case "project-settings":
             openProjectSettings(group);
@@ -1339,8 +1359,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           [...scopeGroups, ...projectGroups.filter((project) => project.archived)]
         : scopedProjectGroups
       : null,
-    keepEmptyFolders: (group) =>
-      scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
+    keepEmptyFolders: (group) => !group.archived || scopedProjectGroups.length > 0,
   });
 
   // Ranked across environments as the palette ranks them, so one
@@ -3192,7 +3211,62 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             <SidebarBoardSections />
           </SidebarGroup>
         ) : null}
-        <SidebarGroup className="flex-1" role="presentation">
+        {!isSearchingThreads ? (
+          <SidebarGroup>
+            <div className="mb-1 flex items-center px-2 text-xs font-medium">
+              {sidebarDisplayMode === "threads" ? "对话" : "项目"}
+              <button
+                type="button"
+                onClick={openAddProjectCommandPalette}
+                className="ml-auto"
+                aria-label="添加项目"
+              >
+                ＋
+              </button>
+            </div>
+            {sidebarDisplayMode === "projects" ? (
+              <ul>
+                {scopeGroups.map((group) => (
+                  <SidebarProjectFolderHeader
+                    key={group.projectKey}
+                    group={group}
+                    collapsed
+                    hiddenThreads={[]}
+                    onToggle={openProjectSettings}
+                    onNewThread={startThreadInProjectFolder}
+                    onContextMenu={handleProjectFolderContextMenu}
+                    onPin={canPinProject(group) ? toggleProjectGroupPin : undefined}
+                    onArchive={canPinProject(group) ? archiveProject : undefined}
+                  />
+                ))}
+              </ul>
+            ) : null}
+            {projectGroups.some((group) => group.archived) ? (
+              <details className="px-2 text-2xs text-sidebar-muted-foreground">
+                <summary>已屏蔽项目</summary>
+                {projectGroups
+                  .filter((group) => group.archived)
+                  .map((group) => (
+                    <div key={group.projectKey} className="flex items-center gap-2 py-1">
+                      <span className="truncate">{group.displayName}</span>
+                      <button
+                        type="button"
+                        disabled={!canPinProject(group)}
+                        onClick={() => archiveProject(group)}
+                        className="ml-auto"
+                      >
+                        恢复
+                      </button>
+                    </div>
+                  ))}
+              </details>
+            ) : null}
+          </SidebarGroup>
+        ) : null}
+        <SidebarGroup
+          className={sidebarDisplayMode === "projects" && !isSearchingThreads ? "hidden" : "flex-1"}
+          role="presentation"
+        >
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -3497,6 +3571,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 hiddenThreads={folder.hiddenThreads}
                                 onToggle={toggleProjectFolder}
                                 onNewThread={startThreadInProjectFolder}
+                                onPin={
+                                  canPinProject(folder.group) ? toggleProjectGroupPin : undefined
+                                }
+                                onArchive={canPinProject(folder.group) ? archiveProject : undefined}
                                 onContextMenu={handleProjectFolderContextMenu}
                               />,
                             );

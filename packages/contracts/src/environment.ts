@@ -44,6 +44,21 @@ export const EnvironmentMachineKind = Schema.Literals(ENVIRONMENT_MACHINE_KINDS)
 export type EnvironmentMachineKind = typeof EnvironmentMachineKind.Type;
 export const isEnvironmentMachineKind = Schema.is(EnvironmentMachineKind);
 
+/** 机器标识色：本地固定绿色，远程机器在设置里挑（前端拒绝重复）。 */
+export const ENVIRONMENT_COLOR_KINDS = [
+  "green",
+  "blue",
+  "orange",
+  "purple",
+  "cyan",
+  "pink",
+  "yellow",
+  "red",
+] as const;
+export const EnvironmentColorKind = Schema.Literals(ENVIRONMENT_COLOR_KINDS);
+export type EnvironmentColorKind = typeof EnvironmentColorKind.Type;
+export const isEnvironmentColorKind = Schema.is(EnvironmentColorKind);
+
 export const ExecutionEnvironmentPlatform = Schema.Struct({
   os: ExecutionEnvironmentPlatformOs,
   arch: ExecutionEnvironmentPlatformArch,
@@ -164,6 +179,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** projects.listIgnoredFiles honors `query`. Older servers ignore it. */
   ignoredFileSearch: Schema.optionalKey(Schema.Boolean),
   environmentIcon: Schema.optionalKey(Schema.Boolean),
+  /** Server accepts environmentColor in settings.update; older servers drop the key. */
+  environmentColor: Schema.optionalKey(Schema.Boolean),
   desktopAppUpdate: Schema.optionalKey(Schema.Boolean),
   /** The desktop app switches update tracks when a server update request names one. */
   desktopAppChannelSwitch: Schema.optionalKey(Schema.Boolean),

@@ -666,6 +666,24 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 @layer base {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  :is(
+    input,
+    textarea,
+    [contenteditable],
+    .chat-markdown,
+    .select-text,
+    pre,
+    code,
+    [data-user-message-bubble],
+    [data-selectable]
+  ) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
   ::highlight(t3-assistant-citation) {
     background-color: color-mix(
       in oklab,

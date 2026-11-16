@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
 import * as Clock from "effect/Clock";
+import { parseRemoteProbe, type CpuCounters } from "./remoteProbe.ts";
 import * as Effect from "effect/Effect";
 
 import type { HostMetrics } from "./HostMetrics.ts";
@@ -28,12 +29,18 @@ const PROBE = [
   "nproc 2>/dev/null || sysctl -n hw.ncpu",
   'cat /proc/loadavg 2>/dev/null | cut -d" " -f1-3 || sysctl -n vm.loadavg | tr -d "{}"',
   'cat /proc/meminfo 2>/dev/null | awk "/MemTotal/{t=\\$2}/MemAvailable/{a=\\$2}END{if(t>0)print t\\",\\"(t-a);else print \\"0,0\\"}" || echo "0,0"',
-  'df -k / | tail -1 | awk "{print \\$2\\",\\"\\$3}"',
+  `df -k / | tail -1 | awk '{print $2 "," $3 "," $4}'`,
   'grep "cpu " /proc/stat 2>/dev/null | head -1',
   "sysctl -n vm_stat 2>/dev/null | head -5",
 ].join("; ");
 
-export interface RemoteHostMetrics extends Partial<HostMetrics> {
+export interface RemoteHostMetrics extends Omit<
+  Partial<HostMetrics>,
+  "memPercent" | "diskPercent"
+> {
+  readonly alias?: string;
+  readonly memPercent?: number | null;
+  readonly diskPercent?: number | null;
   readonly host: string;
   readonly online: boolean;
   readonly error?: string;
@@ -73,38 +80,7 @@ export function readPrivateSshHosts(): ReadonlyArray<string> {
   }
 }
 
-function parseProbe(output: string, alias: string): RemoteHostMetrics {
-  const lines = output
-    .trim()
-    .split("\n")
-    .map((line) => line.trim());
-  const [hostnameLine, platform, cores, load, mem, disk] = lines;
-
-  const [load1 = "0", load5 = "0", load15 = "0"] = (load ?? "").split(/\s+/);
-  const [memTotalKb = "0", memUsedKb = "0"] = (mem ?? "0,0").split(",");
-  const [diskTotalKb = "0", diskUsedKb = "0"] = (disk ?? "0,0").split(",");
-
-  const memTotal = Number(memTotalKb) * 1024;
-  const memUsed = Number(memUsedKb) * 1024;
-  const diskTotal = Number(diskTotalKb) * 1024;
-  const diskUsed = Number(diskUsedKb) * 1024;
-
-  return {
-    host: hostnameLine || alias,
-    online: true,
-    platform: platform ?? "",
-    cores: Number(cores ?? 0) || 0,
-    load: [Number(load1) || 0, Number(load5) || 0, Number(load15) || 0],
-    memTotal,
-    memUsed,
-    memPercent: memTotal > 0 ? Math.round((memUsed / memTotal) * 100) : 0,
-    diskTotal,
-    diskUsed,
-    diskPercent: diskTotal > 0 ? Math.round((diskUsed / diskTotal) * 100) : 0,
-    // CPU 百分比需要两次采样，跨 ssh 不划算；远端只给负载均值，由前端按核数换算展示。
-    cpu: null,
-  };
-}
+const previousCpuByAlias = new Map<string, CpuCounters>();
 
 async function probeHost(alias: string): Promise<RemoteHostMetrics> {
   try {
@@ -122,13 +98,19 @@ async function probeHost(alias: string): Promise<RemoteHostMetrics> {
       ],
       { encoding: "utf8", timeout: SSH_TIMEOUT_MS },
     );
-    const parsed = parseProbe(output, alias);
+    const { metrics: parsed, counters } = parseRemoteProbe(
+      output,
+      alias,
+      previousCpuByAlias.get(alias),
+    );
+    if (counters) previousCpuByAlias.set(alias, counters);
     console.log(`[hostmetrics] ${alias} → ${parsed.host}`);
     return parsed;
   } catch (error) {
     console.warn(`[hostmetrics] ${alias} 探测失败`, error instanceof Error ? error.message : error);
     return {
       host: alias,
+      alias,
       online: false,
       error: error instanceof Error ? error.message.slice(0, 120) : "probe-failed",
     };
@@ -170,7 +152,7 @@ export const sampleRemoteHosts = Effect.fn("hostMetrics.remotes")(function* () {
       const batch = missing;
       inFlight = probeAll(batch)
         .then((results) => {
-          const stampedAt = Date.now();
+          const stampedAt = now;
           for (const [index, result] of results.entries()) {
             const alias = batch[index];
             // 缓存一定要按「别名」存：探测成功时 value.host 是对方的 hostname，
@@ -182,7 +164,8 @@ export const sampleRemoteHosts = Effect.fn("hostMetrics.remotes")(function* () {
           inFlight = null;
         });
     }
-    yield* Effect.promise(() => inFlight);
+    const pending = inFlight;
+    if (pending) yield* Effect.promise(() => pending);
   }
 
   const seen = new Set<string>();
