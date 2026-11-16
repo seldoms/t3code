@@ -150,7 +150,12 @@ export function createNewThreadHandler(router: AnyRouter) {
     const composerModelSelection = composerActiveProvider
       ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
       : null;
-    const carryModelSelection = composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
+    const sourceEnvironmentId =
+      carrySourceShell?.environmentId ?? carrySourceDraft?.environmentId ?? null;
+    const sameEnvironment = sourceEnvironmentId === projectRef.environmentId;
+    const carryModelSelection = sameEnvironment
+      ? (composerModelSelection ?? carrySourceShell?.modelSelection ?? null)
+      : null;
     const carryInteractionMode =
       carrySourceComposer?.interactionMode ??
       carrySourceShell?.interactionMode ??
@@ -172,7 +177,8 @@ export function createNewThreadHandler(router: AnyRouter) {
     const fallbackResolution = resolveNewThreadModelSelection({
       defaultSelection:
         configuredDefaultModelSelection ??
-        (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null
+        (sameEnvironment &&
+        (carryModelSelection || useComposerDraftStore.getState().stickyActiveProvider !== null)
           ? null
           : resolveProjectDefaultProviderModelSelection(
               environmentServerConfigs.get(projectRef.environmentId)?.providers ?? [],
@@ -185,9 +191,10 @@ export function createNewThreadHandler(router: AnyRouter) {
       projectId: projectRef.projectId,
       now: Date.now(),
     });
-    const projectDefaultModelSelection = fallbackResolution.fallback
-      ? fallbackResolution.selection
-      : configuredDefaultModelSelection;
+    const projectDefaultModelSelection =
+      fallbackResolution.fallback || !sameEnvironment
+        ? fallbackResolution.selection
+        : configuredDefaultModelSelection;
     const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
     const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
       resolveNewThreadModelSelectionOverride({
@@ -312,7 +319,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
         const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
         if (!storedDraftHasExplicitModelPick) {
-          applyStickyState(emptyStoredDraftThread.draftId);
+          if (sameEnvironment) applyStickyState(emptyStoredDraftThread.draftId);
           const modelSelectionOverride = resolveModelSelectionOverride(
             emptyStoredDraftThread.draftId,
           );
@@ -429,7 +436,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         runtimeMode: defaultRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
       });
-      applyStickyState(draftId);
+      if (sameEnvironment) applyStickyState(draftId);
       const modelSelectionOverride = resolveModelSelectionOverride(draftId);
       if (modelSelectionOverride) {
         setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });

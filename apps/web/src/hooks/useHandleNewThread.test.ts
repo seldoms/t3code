@@ -203,7 +203,9 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   hasExplicitComposerModelSelection: () => false,
   resolveNewThreadModelSelectionOverride: () => null,
 }));
-vi.mock("../providerInstances", () => ({ resolveDefaultProviderModelSelection: () => null }));
+vi.mock("../providerInstances", () => ({
+  resolveProjectDefaultProviderModelSelection: () => null,
+}));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => testState.projectFileRead,
 }));
@@ -318,6 +320,16 @@ describe.each([
 });
 
 describe("useNewThreadHandler", () => {
+  it("does not apply a global sticky model when creating a draft on another environment", async () => {
+    testState.reset(null);
+    testState.draftStore.applyStickyState.mockClear();
+    const opened = await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    expect(opened).not.toBeNull();
+    expect(testState.draftStore.applyStickyState).not.toHaveBeenCalled();
+  });
   it("keeps the text of a draft that gained some while it waited", async () => {
     testState.reset(null);
     const raced = {
