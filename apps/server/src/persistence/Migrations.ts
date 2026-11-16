@@ -265,6 +265,23 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
 
 const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
 
+/**
+ * fork 历史修复：早期 fork 构建把 boardStage 登记为 095，上游后来占用 095/096，
+ * 本迁移改编号 097（幂等）。ledger 里认出旧名就删掉那条记录，让 095/096/097
+ * 按序补跑；board_stage 列已存在时 097 自动跳过，不丢任何数据。
+ */
+const repairForkBoardStageLedger = Effect.fn("repairForkBoardStageLedger")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `;
+  if (tables.length === 0) return;
+  yield* sql`
+    DELETE FROM effect_sql_migrations
+    WHERE migration_id = 95 AND name = 'ProjectionProjectsBoardStage'
+  `;
+});
+
 // Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
 export const hasPendingMigrations = Effect.fn("hasPendingMigrations")(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -297,6 +314,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {
+    yield* repairForkBoardStageLedger();
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
   }
   const sql = yield* SqlClient.SqlClient;

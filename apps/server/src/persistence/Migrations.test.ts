@@ -193,6 +193,31 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* runMigrations(), []);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
+
+  it.effect("repairs a fork ledger that recorded board stage as 095", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 94 });
+      // 模拟早期 fork 构建：095 加了 board_stage 列并以旧名登记。
+      yield* sql`ALTER TABLE projection_projects ADD COLUMN board_stage TEXT`;
+      yield* sql`
+        INSERT INTO effect_sql_migrations (migration_id, name) VALUES (95, 'ProjectionProjectsBoardStage')
+      `;
+
+      yield* runMigrations();
+
+      const rows = yield* history;
+      assert.deepStrictEqual(rows.slice(-3), [
+        [95, "TurnItemInlineWorkOutput"],
+        [96, "RepairStaleTitleRegeneration"],
+        [97, "ProjectionProjectsBoardStage"],
+      ]);
+      const columns = yield* sql<{ readonly name: string }>`
+        PRAGMA table_info(projection_projects)
+      `;
+      assert.isTrue(columns.some((column) => column.name === "board_stage"));
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
 });
 
 // The npm launcher reads the highest migration id from these file names.
