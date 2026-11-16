@@ -4,9 +4,11 @@
  * 审计 A03 教训：无差别替换会改坏用户内容且切语言不还原，这里必须可逆。
  */
 import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings";
+import { zhSettingsExplanations } from "./zhSettingsExplanations";
 
 /** 英文原文 → 中文。只收界面固定文案，动态插值文本一律跳过。 */
 const ZH: Readonly<Record<string, string>> = {
+  ...zhSettingsExplanations,
   Search: "搜索",
   Back: "返回",
   "New Thread": "新对话",
@@ -1114,7 +1116,7 @@ const ZH: Readonly<Record<string, string>> = {
 };
 
 const CONTROL_SELECTOR =
-  "button, [role='button'], [role='menuitem'], [role='tab'], [role='option'], h1, h2, h3, h4, label, th, summary, dt, [data-slot='settings-row']";
+  "button, [role='button'], [role='menuitem'], [role='tab'], [role='option'], [role='tooltip'], [data-slot='settings-row'], [data-settings-page-scroll], h1, h2, h3, h4, label, th, summary, dt";
 const BLOCKED_SELECTOR =
   "[contenteditable='true'], [contenteditable=''], textarea, input, select, pre, code, [data-message-id], .prose";
 
@@ -1139,7 +1141,7 @@ function translateNode(node: Text): void {
   if (isBlocked(node) || !inControl(node)) return;
   const current = node.nodeValue ?? "";
   const trimmed = current.trim();
-  const replacement = ZH[trimmed];
+  const replacement = ZH[trimmed] ?? ZH[trimmed.replace(/\s+/g, " ")];
   if (replacement === undefined) return;
   if (translated.has(node)) return;
   translated.set(node, current);
@@ -1190,12 +1192,14 @@ function restore(): void {
   for (const node of tracked) {
     const original = translated.get(node);
     if (original !== undefined && node.isConnected) node.nodeValue = original;
+    translated.delete(node);
   }
   tracked.clear();
   for (const element of trackedAttrs) {
     const originals = translatedAttrs.get(element);
     if (!originals || !element.isConnected) continue;
     for (const [attr, value] of originals) element.setAttribute(attr, value);
+    translatedAttrs.delete(element);
   }
   trackedAttrs.clear();
 }
