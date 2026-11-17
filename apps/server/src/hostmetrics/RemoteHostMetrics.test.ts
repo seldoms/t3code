@@ -19,7 +19,7 @@ vi.mock("node:child_process", () => ({
     const line = `cpu ${mocks.calls * 100} 0 100 ${mocks.calls * 800} 0 0 0 0 0 0`;
     queueMicrotask(() =>
       callback(mocks.succeed ? null : new Error("connection reset"), {
-        stdout: `remote-host\nLinux\n4\n1 1 1\n1000,500\n1000,800,100\n${line}\n${line.replace(String(mocks.calls * 100), String(mocks.calls * 100 + 30)).replace(String(mocks.calls * 800), String(mocks.calls * 800 + 70))}\n`,
+        stdout: `remote-host\nLinux\n4\n1 1 1\n1000,500\n1000,800,100\n${line}\nnet 1000 2000\n${line.replace(String(mocks.calls * 100), String(mocks.calls * 100 + 30)).replace(String(mocks.calls * 800), String(mocks.calls * 800 + 70))}\nnet 1300 2600\n`,
       }),
     );
   },

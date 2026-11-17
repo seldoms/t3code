@@ -13,16 +13,29 @@ export function parseRemoteProbe(output: string, alias: string) {
   const diskUsed = (diskValues[1] ?? 0) * 1024;
   const diskAvail =
     diskValues[2] === undefined ? Math.max(0, diskTotal - diskUsed) : diskValues[2] * 1024;
-  const counters = cpuLines.map((line) => {
-    const ticks = line.startsWith("cpu ") ? line.split(/\s+/).slice(1, 9).map(Number) : [];
-    // Linux guest time is already included in user/nice; do not count it twice.
-    return ticks.length >= 5 && ticks.every(Number.isFinite)
+  const counters = cpuLines
+    .filter((line) => line.startsWith("cpu "))
+    .map((line) => {
+      const ticks = line.split(/\s+/).slice(1, 9).map(Number);
+      // Linux guest time is already included in user/nice; do not count it twice.
+      return ticks.length >= 5 && ticks.every(Number.isFinite)
+        ? {
+            total: ticks.reduce((sum, tick) => sum + tick, 0),
+            idle: (ticks[3] ?? 0) + (ticks[4] ?? 0),
+          }
+        : null;
+    });
+  const netLines = cpuLines.filter((line) => line.startsWith("net "));
+  const netValues = netLines.map((line) => line.split(/\s+/).slice(1, 3).map(Number));
+  const [netFirst, netSecond] = netValues;
+  // The probe sleeps a fixed 0.2s between the two reads; loopback is excluded by the probe.
+  const netRates =
+    netFirst && netSecond && netFirst.every(Number.isFinite) && netSecond.every(Number.isFinite)
       ? {
-          total: ticks.reduce((sum, tick) => sum + tick, 0),
-          idle: (ticks[3] ?? 0) + (ticks[4] ?? 0),
+          netRx: Math.max(0, Math.round((netSecond[0]! - netFirst[0]!) / 0.2)),
+          netTx: Math.max(0, Math.round((netSecond[1]! - netFirst[1]!) / 0.2)),
         }
-      : null;
-  });
+      : { netRx: null, netTx: null };
   const first = counters[0];
   const second = counters[1];
   const delta = first && second ? second.total - first.total : 0;
@@ -40,6 +53,8 @@ export function parseRemoteProbe(output: string, alias: string) {
       platform: platform ?? "",
       cores: Number(cores) || 0,
       load: [loads[0] || 0, loads[1] || 0, loads[2] || 0] as const,
+      netRx: netRates.netRx,
+      netTx: netRates.netTx,
       cpu,
       memTotal,
       memUsed,

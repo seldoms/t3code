@@ -31,14 +31,19 @@ const PROBE = [
   'cat /proc/meminfo 2>/dev/null | awk "/MemTotal/{t=\\$2}/MemAvailable/{a=\\$2}END{if(t>0)print t\\",\\"(t-a);else print \\"0,0\\"}" || echo "0,0"',
   `df -k / | tail -1 | awk '{print $2 "," $3 "," $4}'`,
   `grep "^cpu " /proc/stat 2>/dev/null | head -1`,
+  `awk '!/lo:/&&/:/{rx+=$2;tx+=$10}END{print "net",rx+0,tx+0}' /proc/net/dev 2>/dev/null`,
   `if command -v python3 >/dev/null 2>&1; then python3 -c "import time;time.sleep(0.2)"; else sleep 1; fi`,
   `grep "^cpu " /proc/stat 2>/dev/null | head -1`,
+  `awk '!/lo:/&&/:/{rx+=$2;tx+=$10}END{print "net",rx+0,tx+0}' /proc/net/dev 2>/dev/null`,
 ].join("; ");
 
 export interface RemoteHostMetrics extends Omit<
   Partial<HostMetrics>,
   "memPercent" | "diskPercent"
 > {
+  readonly netRx?: number | null;
+  readonly netTx?: number | null;
+  readonly latencyMs?: number | null;
   readonly alias?: string;
   readonly memPercent?: number | null;
   readonly diskPercent?: number | null;
@@ -87,6 +92,7 @@ async function probeHost(
   alias: string,
   currentTimeMillis: () => number,
 ): Promise<RemoteHostMetrics> {
+  const startedAt = currentTimeMillis();
   try {
     const { stdout: output } = await execFileAsync(
       SSH_BIN,
@@ -104,7 +110,11 @@ async function probeHost(
     );
     const { metrics: parsed } = parseRemoteProbe(output, alias);
     console.log(`[hostmetrics] ${alias} → ${parsed.host}`);
-    return { ...parsed, sampledAt: currentTimeMillis() };
+    return {
+      ...parsed,
+      latencyMs: Math.max(1, currentTimeMillis() - startedAt),
+      sampledAt: currentTimeMillis(),
+    };
   } catch (error) {
     console.warn(`[hostmetrics] ${alias} 探测失败`, error instanceof Error ? error.message : error);
     return {

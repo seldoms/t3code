@@ -4,6 +4,14 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
+const SIDEBAR_METRIC_ROWS = [
+  { key: "cpu", title: "CPU", description: "处理器占用百分比与状态色点。" },
+  { key: "memory", title: "内存", description: "内存占用百分比与状态色点。" },
+  { key: "disk", title: "硬盘", description: "根分区占用百分比与状态色点。" },
+  { key: "network", title: "网络", description: "下行/上行速率；远程主机由 SSH 探针测得。" },
+  { key: "latency", title: "延迟", description: "SSH 探针往返耗时；本机不显示。" },
+] as const;
+
 /** 项目板与侧边栏的展示偏好（本机保存，不参与项目级覆盖）。 */
 export function BoardSettingsPanel() {
   const settings = useClientSettings();
@@ -53,6 +61,30 @@ export function BoardSettingsPanel() {
             </Select>
           }
         />
+        <div className="space-y-1 rounded-lg border border-border/60 p-2">
+          <p className="text-xs font-medium">侧栏机器行字段</p>
+          {SIDEBAR_METRIC_ROWS.map((row) => (
+            <SettingsRow
+              key={row.key}
+              devicePreference
+              title={row.title}
+              description={row.description}
+              control={
+                <Switch
+                  checked={settings.monitorSidebarMetrics.includes(row.key)}
+                  aria-label={`侧栏显示${row.title}`}
+                  onCheckedChange={(checked) =>
+                    update({
+                      monitorSidebarMetrics: checked
+                        ? [...settings.monitorSidebarMetrics, row.key]
+                        : settings.monitorSidebarMetrics.filter((key) => key !== row.key),
+                    })
+                  }
+                />
+              }
+            />
+          ))}
+        </div>
         {allMachines.map((machine) => (
           <SettingsRow
             key={machine.key}

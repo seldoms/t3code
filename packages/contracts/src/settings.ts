@@ -596,6 +596,10 @@ export const ClientSettingsSchema = Schema.Struct({
   hiddenMonitorMachines: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** 侧栏机器行显示哪些基础指标；全部关掉只剩名字与状态色点。 */
+  monitorSidebarMetrics: Schema.Array(
+    Schema.Literals(["cpu", "memory", "disk", "network", "latency"]),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(["cpu", "memory", "disk"]))),
   boardSidebarDirs: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardSidebarMachineLoad: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardDefaultView: Schema.Literals(["board", "table"]).pipe(
@@ -2158,6 +2162,9 @@ export const ClientSettingsPatch = Schema.Struct({
     Schema.Literals(["hidden", "local", "environments", "all"]),
   ),
   hiddenMonitorMachines: Schema.optionalKey(Schema.Array(Schema.String)),
+  monitorSidebarMetrics: Schema.optionalKey(
+    Schema.Array(Schema.Literals(["cpu", "memory", "disk", "network", "latency"])),
+  ),
   boardSidebarDirs: Schema.optionalKey(Schema.Boolean),
   boardSidebarMachineLoad: Schema.optionalKey(Schema.Boolean),
   boardDefaultView: Schema.optionalKey(Schema.Literals(["board", "table"])),

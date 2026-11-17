@@ -14,6 +14,9 @@ export interface RemoteHostSnapshot {
   readonly memPercent?: number | null;
   readonly diskPercent?: number | null;
   readonly gpu?: number | null;
+  readonly netRx?: number | null;
+  readonly netTx?: number | null;
+  readonly latencyMs?: number | null;
   readonly sampledAt?: number;
 }
 
@@ -35,9 +38,40 @@ export interface HostMetricsSnapshot {
   readonly receivedAt?: number;
   readonly error?: string;
   readonly remotes?: ReadonlyArray<RemoteHostSnapshot>;
+  readonly netRxTotal?: number;
+  readonly netTxTotal?: number;
+  readonly diskReadTotal?: number;
+  readonly diskWriteTotal?: number;
 }
 
 const REFRESH_MS = 2000;
+
+export interface HostMetricsRates {
+  readonly netRx: number | null;
+  readonly netTx: number | null;
+  readonly diskRead: number | null;
+  readonly diskWrite: number | null;
+}
+
+/** 一阶差分算本机网络与磁盘速率；远程主机由探针直接给出网络速率。 */
+export function hostRates(
+  previous: HostMetricsSnapshot | null,
+  current: HostMetricsSnapshot,
+): HostMetricsRates | null {
+  if (previous === null || previous.host !== current.host) return null;
+  const seconds = ((current.receivedAt ?? 0) - (previous.receivedAt ?? 0)) / 1000;
+  if (seconds <= 0) return null;
+  const rate = (prev: number | undefined, next: number | undefined) =>
+    typeof prev === "number" && typeof next === "number" && next >= prev
+      ? Math.round((next - prev) / seconds)
+      : null;
+  return {
+    netRx: rate(previous.netRxTotal, current.netRxTotal),
+    netTx: rate(previous.netTxTotal, current.netTxTotal),
+    diskRead: rate(previous.diskReadTotal, current.diskReadTotal),
+    diskWrite: rate(previous.diskWriteTotal, current.diskWriteTotal),
+  };
+}
 
 function endpoint(): string {
   try {

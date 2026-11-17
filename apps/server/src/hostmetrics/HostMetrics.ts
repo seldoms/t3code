@@ -28,6 +28,11 @@ export interface HostMetrics {
   readonly diskPercent: number;
   readonly gpu: number | null;
   readonly uptimeSeconds: number;
+  /** 累计字节：客户端一阶差分出速率；拿不到为 undefined，不编数字。 */
+  readonly netRxTotal?: number;
+  readonly netTxTotal?: number;
+  readonly diskReadTotal?: number;
+  readonly diskWriteTotal?: number;
 }
 
 interface CpuSample {
@@ -170,6 +175,7 @@ export const sampleHostMetrics = Effect.fn("hostMetrics.sample")(function* () {
   const memUsed = macUsed ?? memTotal - NodeOS.freemem();
   const disk = yield* Effect.promise(readDisk);
   const load = NodeOS.loadavg();
+  const totals = yield* Effect.promise(() => readIoTotals(platform));
 
   const metrics: HostMetrics = {
     host: NodeOS.hostname(),
@@ -190,10 +196,85 @@ export const sampleHostMetrics = Effect.fn("hostMetrics.sample")(function* () {
       disk.total > 0 ? Math.round((disk.used / Math.max(1, disk.used + disk.avail)) * 100) : 0,
     gpu: yield* Effect.promise(() => sampleGpu(platform)),
     uptimeSeconds: Math.round(NodeOS.uptime()),
+    ...totals,
   };
 
   return metrics;
 });
+
+/** Linux 读 /proc 计数器；macOS 用 netstat -ib 与 ioreg IODiskSwapBlockDevice；拿不到就缺省，不编数字。 */
+async function readIoTotals(
+  platform: string,
+): Promise<Pick<HostMetrics, "netRxTotal" | "netTxTotal" | "diskReadTotal" | "diskWriteTotal">> {
+  try {
+    if (platform === "linux") {
+      const [netStat, diskStat] = await Promise.all([
+        NodeFSP.readFile("/proc/net/dev", "utf8").catch(() => ""),
+        NodeFSP.readFile("/proc/diskstats", "utf8").catch(() => ""),
+      ]);
+      let netRxTotal = 0;
+      let netTxTotal = 0;
+      for (const line of netStat.split("\n")) {
+        const columns = line.trim().split(/[|:]*\s+/);
+        const name = columns[0]?.replace(":", "");
+        if (!name || name === "lo") continue;
+        netRxTotal += Number(columns[1]) || 0;
+        netTxTotal += Number(columns[9]) || 0;
+      }
+      let diskReadTotal = 0;
+      let diskWriteTotal = 0;
+      for (const line of diskStat.split("\n")) {
+        const columns = line.trim().split(/\s+/);
+        const name = columns[2];
+        if (!name || /\d$/.test(name)) continue;
+        diskReadTotal += (Number(columns[5]) || 0) * 512;
+        diskWriteTotal += (Number(columns[9]) || 0) * 512;
+      }
+      return { netRxTotal, netTxTotal, diskReadTotal, diskWriteTotal };
+    }
+    if (platform === "darwin") {
+      const [{ stdout: netstat }, { stdout: ioreg }] = await Promise.all([
+        execFileAsync("netstat", ["-ib"], { encoding: "utf8", timeout: 2000 }).catch(() => ({
+          stdout: "",
+        })),
+        execFileAsync("ioreg", ["-r", "-d", "1", "-w", "0", "-c", "IOBlockStorageDriver"], {
+          encoding: "utf8",
+          timeout: 2000,
+        }).catch(() => ({ stdout: "" })),
+      ]);
+      let netRxTotal = 0;
+      let netTxTotal = 0;
+      for (const line of netstat.split("\n").slice(1)) {
+        const columns = line.trim().split(/\s+/);
+        const name = columns[0];
+        if (
+          !name ||
+          name.startsWith("lo") ||
+          name.startsWith("awdl") ||
+          name.startsWith("llw") ||
+          name.startsWith("bridge") ||
+          name.startsWith("utun") ||
+          name.startsWith("anon")
+        )
+          continue;
+        netRxTotal += Number(columns[6]) || 0;
+        netTxTotal += Number(columns[9]) || 0;
+      }
+      let diskReadTotal: number | undefined;
+      let diskWriteTotal: number | undefined;
+      const readBytes = /"Bytes \(Read\)"=(\d+)/.exec(ioreg);
+      const writeBytes = /"Bytes \(Write\)"=(\d+)/.exec(ioreg);
+      if (readBytes && writeBytes) {
+        diskReadTotal = Number(readBytes[1]);
+        diskWriteTotal = Number(writeBytes[1]);
+      }
+      return { netRxTotal, netTxTotal, diskReadTotal, diskWriteTotal };
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
 
 /** 采样器预热：让下一个请求就有 CPU 数字。 */
 export const warmHostMetrics = Effect.sync(() => {

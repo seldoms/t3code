@@ -15,6 +15,15 @@ export const HostResourcesSnapshot = Schema.Struct({
 });
 export type HostResourcesSnapshot = typeof HostResourcesSnapshot.Type;
 
+/** 网络吞吐与磁盘读写速率，字节/秒；采样不到为 null，不编数字。 */
+export const HostResourceRates = Schema.Struct({
+  netRxBytesPerSecond: Schema.NullOr(Schema.Number),
+  netTxBytesPerSecond: Schema.NullOr(Schema.Number),
+  diskReadBytesPerSecond: Schema.NullOr(Schema.Number),
+  diskWriteBytesPerSecond: Schema.NullOr(Schema.Number),
+});
+export type HostResourceRates = typeof HostResourceRates.Type;
+
 export const ResourceTelemetryIoSemantics = Schema.Literals([
   "storage",
   "logical",

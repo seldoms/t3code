@@ -3,12 +3,22 @@ import { ActivityIcon, BoxesIcon } from "lucide-react";
 
 import { useSidebarHostFilter } from "../../sidebarHostFilter";
 import { useMachineMonitor } from "../../hooks/useMachineMonitor";
+import { useClientSettings } from "../../hooks/useSettings";
 import { useEnvironmentColors } from "../../environmentColors";
-import { MachineMonitor } from "../board/MachineMonitor";
+import { MachineMonitor, type MonitorMetric } from "../board/MachineMonitor";
 import { useSidebar } from "../ui/sidebar";
+
+const MONITOR_METRICS: ReadonlyArray<MonitorMetric> = [
+  "cpu",
+  "memory",
+  "disk",
+  "network",
+  "latency",
+];
 
 export function SidebarBoardSections() {
   const { machines } = useMachineMonitor();
+  const settings = useClientSettings();
   const colors = useEnvironmentColors();
   const hostFilter = useSidebarHostFilter((state) => state.selected);
   const selectHost = useSidebarHostFilter((state) => state.select);
@@ -56,6 +66,9 @@ export function SidebarBoardSections() {
       </div>
       <MachineMonitor
         compact
+        metrics={MONITOR_METRICS.filter((metric) =>
+          settings.monitorSidebarMetrics.includes(metric),
+        )}
         machines={machines}
         colorFor={(machine) =>
           machine.local

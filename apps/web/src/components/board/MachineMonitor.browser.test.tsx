@@ -15,6 +15,9 @@ const local: MonitoredMachine = {
   cpu: 18,
   memory: 74,
   disk: 87,
+  netRx: 2_400_000,
+  netTx: 512_000,
+  latencyMs: null,
   sampledAt: 1_800_000_000_000,
   stale: false,
 };
@@ -26,6 +29,7 @@ const remote: MonitoredMachine = {
   cpu: 25,
   memory: 55,
   disk: null,
+  latencyMs: 120,
 };
 
 it("expands a single machine, switches to one-row-per-host for multiple machines, and restores details on demand", async () => {
@@ -44,14 +48,23 @@ it("expands a single machine, switches to one-row-per-host for multiple machines
   await expect
     .element(screen.getByRole("button", { name: "展开 Mac 负载", exact: true }))
     .toHaveAttribute("aria-expanded", "false");
-  await expect
-    .element(screen.getByRole("button", { name: "展开 uslab-gw-01 负载", exact: true }))
-    .toBeVisible();
-  expect(screen.container.querySelectorAll('[role="progressbar"]')).toHaveLength(0);
+  // 折叠行显示状态色点；默认指标不包含网络/延迟，不出现对应元素。
+  await expect.element(screen.getByLabelText("CPU 正常").first()).toBeVisible();
+  expect(screen.container.textContent).not.toContain("120ms");
+  await screen.rerender(
+    <MachineMonitor
+      machines={[local, remote]}
+      colorFor={colorFor}
+      metrics={["cpu", "memory", "disk", "network", "latency"]}
+    />,
+  );
+  await expect.element(screen.getByLabelText("网络 正常").first()).toBeVisible();
+  await expect.element(screen.getByText("120ms")).toBeVisible();
   await screen.getByRole("button", { name: "展开 uslab-gw-01 负载", exact: true }).click();
-  await expect
-    .element(screen.getByRole("progressbar", { name: "硬盘", exact: true }))
-    .toHaveAttribute("aria-valuetext", "未获取");
+  await expect.element(screen.getByText(/↓.*↑/)).toBeVisible();
+  await expect.element(screen.getByText("120 ms")).toBeVisible();
+  // 硬盘未知显示文字行，不伪造 0%。
+  await expect.element(screen.getByText("未知").first()).toBeVisible();
   expect(screen.container.scrollWidth).toBeLessThanOrEqual(screen.container.clientWidth);
   await page.screenshot({ path: "/tmp/t3-machine-monitor-multiple.png" });
   await screen.rerender(

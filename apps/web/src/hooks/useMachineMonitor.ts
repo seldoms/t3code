@@ -158,7 +158,17 @@ export function useMachineMonitor() {
           receivedAt === null ||
           now - receivedAt > 30_000 ||
           (detail?.receivedAt !== undefined && now - detail.receivedAt > 30_000);
-        return { ...machine, cpu, memory, disk, sampledAt, stale };
+        return {
+          ...machine,
+          cpu,
+          memory,
+          disk,
+          netRx: machine.netRx,
+          netTx: machine.netTx,
+          latencyMs: machine.latencyMs,
+          sampledAt,
+          stale,
+        };
       }),
   };
 }

@@ -11,10 +11,8 @@ import { useEnvironmentColors } from "../../environmentColors";
 import { EnvironmentColorDot } from "../EnvironmentColorDot";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { LayoutGridIcon, Rows3Icon } from "lucide-react";
-import { MachineMonitor } from "./MachineMonitor";
 import { BoardWorkspace } from "./BoardWorkspace";
 import GitActionsControl from "../GitActionsControl";
-import { useMachineMonitor } from "../../hooks/useMachineMonitor";
 import { inferProjectTitleFromPath } from "@t3tools/client-runtime/state/projects";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 
@@ -1653,25 +1651,11 @@ function NewProjectDialog({
 }
 
 function HostStrip({ scannedAt }: { scannedAt: string | null }) {
-  const colors = useEnvironmentColors();
-  const { machines } = useMachineMonitor();
-  return (
-    <div className="max-h-[35vh] shrink-0 overflow-y-auto border-b border-border px-4 py-1.5">
-      <MachineMonitor
-        machines={machines}
-        colorFor={(machine) =>
-          machine.local
-            ? "green"
-            : machine.environmentId
-              ? (colors.get(machine.environmentId) ?? "gray")
-              : "gray"
-        }
-      />
-      {scannedAt ? (
-        <p className="mt-1 text-3xs text-muted-foreground/60">项目快照采集于 {scannedAt}</p>
-      ) : null}
-    </div>
-  );
+  return scannedAt ? (
+    <p className="flex-none border-b border-border px-4 py-1 text-3xs text-muted-foreground/60">
+      项目快照采集于 {scannedAt}
+    </p>
+  ) : null;
 }
 
 function Badge({

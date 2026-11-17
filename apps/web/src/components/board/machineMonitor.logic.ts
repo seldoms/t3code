@@ -11,6 +11,11 @@ export interface MonitoredMachine {
   readonly cpu: number | null;
   readonly memory: number | null;
   readonly disk: number | null;
+  /** 字节/秒；拿不到为 null。 */
+  readonly netRx: number | null;
+  readonly netTx: number | null;
+  /** 本机往返探测耗时毫秒；本机为 null，SSH 主机为整条探针耗时。 */
+  readonly latencyMs: number | null;
   readonly sampledAt: number | null;
   readonly stale: boolean;
 }
@@ -32,6 +37,8 @@ const sampleTime = (value: number | undefined, receivedAt?: number) => value ?? 
 const staleAt = (at: number | null, now: number) => at !== null && now - at > 30_000;
 const percent = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+const bytesPerSecond = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 
 export function monitoredMachines(
   metrics: HostMetricsSnapshot | null,
@@ -53,6 +60,9 @@ export function monitoredMachines(
       cpu: percent(metrics?.cpu),
       memory: percent(metrics?.memPercent),
       disk: percent(metrics?.diskPercent),
+      netRx: null,
+      netTx: null,
+      latencyMs: null,
       sampledAt: sampleTime(metrics?.sampledAt, metrics?.receivedAt),
       stale:
         metrics?.error !== undefined ||
@@ -82,6 +92,9 @@ export function monitoredMachines(
       cpu: remote.online ? percent(remote.cpu) : null,
       memory: remote.online ? percent(remote.memPercent) : null,
       disk: remote.online ? percent(remote.diskPercent) : null,
+      netRx: remote.online ? bytesPerSecond(remote.netRx) : null,
+      netTx: remote.online ? bytesPerSecond(remote.netTx) : null,
+      latencyMs: remote.online ? (remote.latencyMs ?? null) : null,
       sampledAt: remote.sampledAt ?? null,
       stale:
         metrics?.error !== undefined ||
@@ -108,6 +121,9 @@ export function monitoredMachines(
       cpu: null,
       memory: null,
       disk: null,
+      netRx: null,
+      netTx: null,
+      latencyMs: null,
       sampledAt: null,
       stale: false,
     });

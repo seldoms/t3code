@@ -20,6 +20,9 @@ it("merges matching remote metrics with connection identity without conflating S
         cpu: 30,
         memPercent: 60,
         diskPercent: 40,
+        netRx: 1500,
+        netTx: 3000,
+        latencyMs: 120,
       },
       { host: "5060", online: false },
     ],
@@ -43,6 +46,9 @@ it("merges matching remote metrics with connection identity without conflating S
   expect(rows).toHaveLength(4);
   expect(rows[1]?.environmentId).toBe("p15");
   expect(rows[1]?.cpu).toBe(30);
+  expect(rows[1]?.netRx).toBe(1500);
+  expect(rows[1]?.netTx).toBe(3000);
+  expect(rows[1]?.latencyMs).toBe(120);
   expect(rows[1]?.stale).toBe(false);
   expect(rows[1]?.sampledAt).not.toBeNull();
   expect(machineConnectionLabel(rows[1]!)).toBe("T3 已连接");
