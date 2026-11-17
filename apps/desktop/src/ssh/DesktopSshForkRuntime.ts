@@ -10,9 +10,19 @@ export const FORK_RUNTIME_VERSION = "0.1.9-fork.1";
 export const FORK_RELEASE_BASE_URL = "https://github.com/seldoms/t3code/releases/download";
 export const REMOTE_RUNTIME_VERSION_ENV = "T3CODE_REMOTE_RUNTIME_VERSION";
 
-export function forkArchiveRunner(env: NodeJS.ProcessEnv): RemoteT3RunnerOptions {
+/**
+ * fork 归档发布后翻成 true。在此之前返回 null 让调用方沿用上游 archive：
+ * 指着一个还没发布的版本会让每台 SSH 机器下载 404 直接连不上。
+ */
+export const FORK_ARCHIVE_PUBLISHED = false;
+
+/** null 表示「还用上游」；显式给了环境变量就照办，方便发布前拿镜像验证。 */
+export function forkArchiveRunner(env: NodeJS.ProcessEnv): RemoteT3RunnerOptions | null {
+  const version = env[REMOTE_RUNTIME_VERSION_ENV]?.trim() || "";
+  const baseUrl = env[CLI_RELEASE_BASE_URL_ENV]?.trim() || "";
+  if (!FORK_ARCHIVE_PUBLISHED && version === "" && baseUrl === "") return null;
   return {
-    archiveVersion: env[REMOTE_RUNTIME_VERSION_ENV]?.trim() || FORK_RUNTIME_VERSION,
-    releaseBaseUrl: env[CLI_RELEASE_BASE_URL_ENV]?.trim() || FORK_RELEASE_BASE_URL,
+    archiveVersion: version || FORK_RUNTIME_VERSION,
+    releaseBaseUrl: baseUrl || FORK_RELEASE_BASE_URL,
   };
 }

@@ -120,7 +120,7 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  return forkArchiveRunner(process.env);
+  return forkArchiveRunner(process.env) ?? { archiveVersion: environment.appVersion };
 };
 
 const layerDesktopSshEnvironment = Layer.unwrap(
