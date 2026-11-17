@@ -260,8 +260,8 @@ async function readIoTotals(
         netRxTotal += Number(columns[6]) || 0;
         netTxTotal += Number(columns[9]) || 0;
       }
-      let diskReadTotal: number | undefined;
-      let diskWriteTotal: number | undefined;
+      let diskReadTotal = 0;
+      let diskWriteTotal = 0;
       const readBytes = /"Bytes \(Read\)"=(\d+)/.exec(ioreg);
       const writeBytes = /"Bytes \(Write\)"=(\d+)/.exec(ioreg);
       if (readBytes && writeBytes) {

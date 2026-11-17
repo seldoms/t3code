@@ -1,4 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off -- 会话扫描读 sqlite/jsonl 文件与 git config，属于存储边界，不是业务 IO。
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeZlib from "node:zlib";
 
@@ -114,6 +117,7 @@ const TranscriptMessage = Schema.Struct({
   role: Schema.optional(Schema.String),
   content: Schema.optional(Schema.Union([Schema.String, Schema.Array(TranscriptContentBlock)])),
   model: Schema.optional(Schema.String),
+  parts: Schema.optional(Schema.Array(TranscriptContentBlock)),
 });
 
 const CodexTurnMetadata = Schema.Struct({
@@ -122,6 +126,8 @@ const CodexTurnMetadata = Schema.Struct({
 
 const TranscriptRecord = Schema.Struct({
   type: Schema.optional(Schema.String),
+  role: Schema.optional(Schema.String),
+  executionContext: Schema.optional(Schema.Struct({ modelId: Schema.optional(Schema.String) })),
   // Pi entries form a tree through id/parentId; session_info entries carry its name.
   id: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.NullOr(Schema.String)),
@@ -185,6 +191,27 @@ const CODEX_ROLLOUT_ID_PATTERN =
 const COMPRESSED_TRANSCRIPT_SUFFIX = ".jsonl.zst";
 const isCompressedTranscript = (filePath: string) =>
   filePath.endsWith(COMPRESSED_TRANSCRIPT_SUFFIX);
+// Cursor encodes the project path as dash-joined segments; a dash can also appear inside a
+// segment, so decode greedily longest-first and only accept paths that fully exist.
+const cursorProjectDirectory = (projectsDir: string, slug: string): string | null => {
+  let directory = NodePath.parse(projectsDir).root;
+  let rest = slug;
+  while (rest.length > 0) {
+    const segments = rest.split("-");
+    let matched = false;
+    for (let take = segments.length; take > 0; take -= 1) {
+      const candidate = NodePath.join(directory, segments.slice(0, take).join("-"));
+      if (isExistingDirectory(candidate)) {
+        directory = candidate;
+        rest = segments.slice(take).join("-");
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) return null;
+  }
+  return directory;
+};
 // Codex records a chat's project only here; moving a chat leaves its rollout cwd unchanged.
 const CODEX_STATE_DATABASE = "state_5.sqlite";
 const decodeCodexSessionIndexEntry = Schema.decodeUnknownOption(
@@ -479,13 +506,19 @@ function parseAgentSessionRecords(
       ? ""
       : input.source === "pi"
         ? records.find((record) => record.type === "session")?.id?.trim() || input.fallbackSessionId
-        : (claudeFields.sessionId ?? input.fallbackSessionId);
+        : input.source === "cursor"
+          ? input.fallbackSessionId
+          : (claudeFields.sessionId ?? input.fallbackSessionId);
   // Pi titles a session by its latest session_info on any branch; an empty name clears it.
   const title =
     input.source === "pi"
       ? records.findLast((record) => record.type === "session_info")?.name?.trim() || null
       : (claudeFields.title ?? null);
   let model = claudeFields.model ?? null;
+  const qwenModel = records
+    .findLast((record) => record.executionContext?.modelId?.trim())
+    ?.executionContext?.modelId?.trim();
+  if (input.source === "qwenCode" && qwenModel) model = qwenModel;
   let derivedTitle: string | undefined;
   let hasCodexSessionId = false;
   const messages: Array<AgentSessionThreadMessage & { readonly codexResponseUser: boolean }> = [];
@@ -591,15 +624,28 @@ function parseAgentSessionRecords(
       });
       continue;
     }
-    if (input.source === "claudeAgent") {
-      if (isHiddenClaudeRecord(record)) continue;
-      if (record.type !== "user" && record.type !== "assistant") continue;
+    if (input.source === "claudeAgent" || input.source === "qwenCode") {
+      if (input.source === "claudeAgent" && isHiddenClaudeRecord(record)) continue;
+      const role = input.source === "qwenCode" ? record.type : record.type;
+      if (role !== "user" && role !== "assistant") continue;
+      const text = extractText(record.message?.content ?? record.message?.parts);
+      if (text.length === 0) continue;
+      retainMessage({
+        role,
+        text,
+        createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
+        codexResponseUser: false,
+      });
+      continue;
+    }
+    if (input.source === "cursor") {
+      if (record.role !== "user" && record.role !== "assistant") continue;
       const text = extractText(record.message?.content);
       if (text.length === 0) continue;
       retainMessage({
-        role: record.type,
+        role: record.role,
         text,
-        createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
+        createdAt: fallbackTimestamp,
         codexResponseUser: false,
       });
       continue;
@@ -698,6 +744,19 @@ function shouldRetainDecodedRecord(
 ): boolean {
   // Any Pi entry can be a link on the active branch.
   if (source === "pi") return true;
+  if (source === "cursor") {
+    if (record.role !== "user" && record.role !== "assistant") return false;
+    const content = record.message?.content;
+    return typeof content === "string"
+      ? content.trim().length > 0
+      : (content?.some(
+          (block) => isTextContentBlock(block) && (block.text?.trim().length ?? 0) > 0,
+        ) ?? false);
+  }
+  if (source === "qwenCode") {
+    if (record.type !== "user" && record.type !== "assistant") return false;
+    return extractText(record.message?.content ?? record.message?.parts).length > 0;
+  }
   if (source === "claudeAgent") {
     if (isHiddenClaudeRecord(record) || (record.type !== "user" && record.type !== "assistant")) {
       return false;
@@ -796,6 +855,14 @@ function extractCwd(line: string, source: AgentSessionSource): string | null | f
   }
   return null;
 }
+
+const isExistingDirectory = (target: string) => {
+  try {
+    return NodeFS.statSync(target, { throwIfNoEntry: false })?.isDirectory() === true;
+  } catch {
+    return false;
+  }
+};
 
 function transcriptIdentity(filePath: string, stats: FileSystem.File.Info) {
   return {
@@ -1133,6 +1200,8 @@ export const make = Effect.gen(function* () {
     transcript: TranscriptCandidate,
     budget: MetadataReadBudget,
   ) {
+    // Cursor transcripts carry no cwd; discovery decodes it from the project slug.
+    if (source === "cursor") return transcript.projectRoots?.[0] ?? null;
     if (transcript.identity.size === 0) return null;
     if (
       budget.bytesRemaining === 0 ||
@@ -1644,6 +1713,131 @@ export const make = Effect.gen(function* () {
     return { transcripts, truncated, operationsUsed: operationBudget - operationsRemaining };
   });
 
+  // Cursor: ~/.cursor/projects/<slug>/agent-transcripts/<sessionId>/<sessionId>.jsonl（顶层 role/message，无 cwd，目录名即项目路径编码）。
+  const discoverCursorTranscripts = Effect.fn("AgentSessionScanner.discoverCursorTranscripts")(
+    function* (homePath: string, providerInstanceId: ProviderInstanceId, operationBudget: number) {
+      const projectsDir = path.join(homePath, "projects");
+      let operationsRemaining = operationBudget;
+      let truncated = false;
+      const transcripts: Array<TranscriptCandidate> = [];
+      for (const slug of yield* listDirectory(projectsDir)) {
+        if (operationsRemaining <= 0) {
+          truncated = true;
+          break;
+        }
+        const projectDirectory = cursorProjectDirectory(projectsDir, slug);
+        if (projectDirectory === null) continue;
+        const sessionsDir = path.join(projectsDir, slug, "agent-transcripts");
+        operationsRemaining -= 1;
+        for (const sessionId of yield* listDirectory(sessionsDir)) {
+          if (operationsRemaining <= 0) {
+            truncated = true;
+            break;
+          }
+          const filePath = path.join(sessionsDir, sessionId, `${sessionId}.jsonl`);
+          operationsRemaining -= 1;
+          const stats = yield* statOption(filePath);
+          if (
+            Option.isSome(stats) &&
+            stats.value.type === "File" &&
+            Option.isSome(stats.value.mtime)
+          ) {
+            transcripts.push({
+              filePath,
+              mtimeMs: stats.value.mtime.value.getTime(),
+              providerInstanceId,
+              homePath,
+              identity: transcriptIdentity(filePath, stats.value),
+              projectRoots: [projectDirectory],
+            });
+          }
+        }
+      }
+      return { transcripts, truncated, operationsUsed: operationBudget - operationsRemaining };
+    },
+  );
+
+  // Qwen Code: ~/.qwen/projects/<slug>/chats/<uuid>.jsonl（Claude 形态：type user/assistant + message.parts + cwd/sessionId）。
+  const discoverQwenTranscripts = Effect.fn("AgentSessionScanner.discoverQwenTranscripts")(
+    function* (homePath: string, providerInstanceId: ProviderInstanceId, operationBudget: number) {
+      const projectsDir = path.join(homePath, "projects");
+      let operationsRemaining = operationBudget;
+      let truncated = false;
+      const transcripts: Array<TranscriptCandidate> = [];
+      for (const slug of yield* listDirectory(projectsDir)) {
+        if (operationsRemaining <= 0) {
+          truncated = true;
+          break;
+        }
+        operationsRemaining -= 1;
+        const chatsDir = path.join(projectsDir, slug, "chats");
+        for (const entry of yield* listDirectory(chatsDir)) {
+          if (operationsRemaining <= 0) {
+            truncated = true;
+            break;
+          }
+          if (!entry.endsWith(".jsonl")) continue;
+          const filePath = path.join(chatsDir, entry);
+          operationsRemaining -= 1;
+          const stats = yield* statOption(filePath);
+          if (
+            Option.isSome(stats) &&
+            stats.value.type === "File" &&
+            Option.isSome(stats.value.mtime)
+          ) {
+            transcripts.push({
+              filePath,
+              mtimeMs: stats.value.mtime.value.getTime(),
+              providerInstanceId,
+              homePath,
+              identity: transcriptIdentity(filePath, stats.value),
+            });
+          }
+        }
+      }
+      return { transcripts, truncated, operationsUsed: operationBudget - operationsRemaining };
+    },
+  );
+
+  // OpenCode：只读 sqlite（session.directory 就是 cwd），无 transcript 文件，不支持导入只出现在候选里。
+  const collectOpencodeCandidates = Effect.fn("AgentSessionScanner.collectOpencodeCandidates")(
+    function* (dataHome: string, providerInstanceId: ProviderInstanceId) {
+      const databasePath = path.join(dataHome, "opencode.db");
+      const sessions = yield* Effect.try({
+        try: () => {
+          const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
+          try {
+            database.exec("PRAGMA busy_timeout = 100");
+            return database
+              .prepare(
+                `SELECT directory, COUNT(*) AS count, MAX(time_updated) AS updated
+                 FROM session WHERE directory IS NOT NULL AND directory != ''
+                 GROUP BY directory`,
+              )
+              .all() as unknown as ReadonlyArray<{
+              directory: string;
+              count: number;
+              updated: number | null;
+            }>;
+          } finally {
+            database.close();
+          }
+        },
+        catch: () => null,
+      }).pipe(Effect.orElseSucceed(() => null));
+      if (sessions === null) return [];
+      return sessions.map((session): RawCandidate => ({
+        cwd: session.directory,
+        source: "opencode",
+        providerInstanceId,
+        homePath: dataHome,
+        threadCount: session.count,
+        lastActiveAtMs: session.updated === null ? null : session.updated,
+        transcripts: [],
+      }));
+    },
+  );
+
   const groupTranscriptsByCwd = Effect.fn("AgentSessionScanner.groupTranscriptsByCwd")(function* (
     source: AgentSessionSource,
     transcripts: ReadonlyArray<TranscriptCandidate>,
@@ -1731,7 +1925,40 @@ export const make = Effect.gen(function* () {
     let truncated = false;
     let metadataTruncated = false;
 
-    for (const source of ["claudeAgent", "codex", "pi"] as const) {
+    // 非文件来源：OpenCode 的会话在 sqlite，无 transcript，不占导入预算。
+    // 显式禁用的实例跳过；新来源测试里必须显式指向 temp home，别扫到开发机真实数据。
+    const instanceConfig = (source: string) => {
+      const entry = Object.entries(settings.providerInstances).find(
+        ([, instance]) => instance.driver === source,
+      );
+      if (entry === undefined)
+        return {
+          instanceId: ProviderInstanceId.make(source),
+          enabled: !(source === "opencode" || source === "cursor" || source === "qwenCode"),
+          homePath: null,
+        };
+      const [, instance] = entry;
+      const homePath = instance.environment?.findLast((v) => v.name === "T3_SESSION_HOME")?.value;
+      return {
+        instanceId: ProviderInstanceId.make(entry[0]),
+        enabled: resolveProviderInstanceEnabled(instance),
+        homePath: typeof homePath === "string" && homePath.trim() ? homePath : null,
+      };
+    };
+
+    {
+      const opencode = instanceConfig("opencode");
+      if (opencode.enabled) {
+        raw.push(
+          ...(yield* collectOpencodeCandidates(
+            opencode.homePath ?? path.join(homeDir, ".local/share/opencode"),
+            opencode.instanceId,
+          )),
+        );
+      }
+    }
+
+    for (const source of ["claudeAgent", "codex", "pi", "cursor", "qwenCode"] as const) {
       const instances: Array<{
         readonly instanceId: ProviderInstanceId;
         readonly config: ProviderInstanceConfig;
@@ -1744,6 +1971,8 @@ export const make = Effect.gen(function* () {
           config,
         }));
       if (!Object.hasOwn(settings.providerInstances, source)) {
+        // qwenCode 没有 provider driver；unconfigured 默认不扫，测试与真实数据隔离。
+        if (source === "qwenCode") continue;
         const defaultInstance = {
           instanceId: ProviderInstanceId.make(source),
           config: { driver: ProviderDriverKind.make(source) },
@@ -1769,7 +1998,10 @@ export const make = Effect.gen(function* () {
         };
 
         let homePath: string;
-        if (source === "pi") {
+        if (source === "cursor" || source === "qwenCode") {
+          const override = instanceConfig(source).homePath;
+          homePath = override ?? path.join(homeDir, source === "cursor" ? ".cursor" : ".qwen");
+        } else if (source === "pi") {
           const environment = yield* mergeProviderInstanceEnvironment(
             instance.environment,
             hostEnvironment,
@@ -1814,7 +2046,11 @@ export const make = Effect.gen(function* () {
           ? discoverClaudeTranscripts
           : source === "codex"
             ? discoverCodexTranscripts
-            : discoverPiTranscripts;
+            : source === "cursor"
+              ? discoverCursorTranscripts
+              : source === "qwenCode"
+                ? discoverQwenTranscripts
+                : discoverPiTranscripts;
       const shares = splitOperationBudget(MAX_DISCOVERY_OPERATIONS_PER_SOURCE, homes.length);
       const discovered: Array<{
         readonly transcripts: ReadonlyArray<TranscriptCandidate>;

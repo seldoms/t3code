@@ -1849,6 +1849,9 @@ const IMPORT_SOURCE_NAMES: Record<AgentSessionSource, string> = {
   claudeAgent: "Claude Code",
   codex: "Codex",
   pi: "Pi",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+  qwenCode: "Qwen Code",
 };
 const IMPORT_SOURCES_LABEL = new Intl.ListFormat("en", { type: "conjunction" }).format(
   AgentSessionSource.literals.map((source) => IMPORT_SOURCE_NAMES[source]),
@@ -1866,7 +1869,7 @@ function ImportRowMeta({
   const relative = lastActiveAt === null ? null : formatRelativeTime(lastActiveAt);
   const age = relative === null ? "" : relative.suffix === null ? "now" : relative.value;
   return (
-    <span className="ml-auto grid shrink-0 grid-cols-[1rem_1rem_1rem_2.5rem_2.25rem] items-center gap-x-1 text-xs text-muted-foreground tabular-nums">
+    <span className="ml-auto grid shrink-0 grid-cols-[repeat(auto-fit,1rem)_2.5rem_2.25rem] items-center gap-x-1 text-xs text-muted-foreground tabular-nums">
       {AgentSessionSource.literals.map((source) => (
         <span key={source} className="flex size-4 items-center justify-center">
           {sources?.includes(source) ? (
