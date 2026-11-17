@@ -19,12 +19,17 @@
 
 ### 1. 服务端：新增只读列表 RPC `agentSessions.list`
 
-输入：`{ environmentId, projectPath }`（或 `projectId`，二者都要支持：扫描目录尚未接管时只有 path）。
+输入：`{ workspaceRoot }`（environment 由 RPC 外层决定；扫描目录尚未接管时也能列，但 `imported` 恒为 false）。
 
-输出：按 `lastActiveAt` 倒序的数组：
+输出 `AgentSessionListResult`：
 
 ```ts
-interface AgentSessionSummary {
+interface AgentSessionListResult {
+  sessions: AgentSessionListEntry[]; // 按 lastActiveAtMs 倒序
+  truncated?: boolean; // 该项目还有更早的会话没进列表
+}
+
+interface AgentSessionListEntry {
   source: "claudeAgent" | "codex" | "pi" | "opencode" | "cursor" | "qwenCode";
   providerInstanceId: ProviderInstanceId;
   providerSessionId: string; // resume 与去重的稳定键
@@ -32,7 +37,7 @@ interface AgentSessionSummary {
   lastActiveAtMs: number;
   model: string | null;
   filePath: string | null; // sqlite 来源（opencode）为 null
-  imported: boolean; // 与已有线程的 providerSessionId 命中即 true
+  imported: boolean; // 与已导入记录命中即 true
   importable: boolean; // 该来源是否有 driver（决定能否"继续"）
 }
 ```
@@ -43,8 +48,8 @@ interface AgentSessionSummary {
 - **标题只读文件前缀**：现有 `TRANSCRIPT_PREFIX_BYTES = 32 KiB` 足够覆盖首条用户消息；Claude/Codex 还需跳过 `<environment_context>`、`<user_instruction>` 等前导块（`deriveTitle` 已有该逻辑）。
 - OpenCode 直接查 `session` 表拿 `title` 与 `time_updated`，零文件读取。
 - **不计入导入预算**：这是浏览，不是导入；预算只管真正的导入路径。
-- 去掉 30 天窗口（或把它变成参数），列表默认最近 200 条，超出标注 `truncated`。
-- 服务端按 `(environmentId, projectPath)` 缓存 60 秒，避免每次打开项目都重读几十份转录。
+- **每个项目只列最近 5 条**（`MAX_LISTED_TRANSCRIPTS`，按转录 mtime 取前 5），更多时置 `truncated: true`。不设 30 天窗口，所以老会话只要还在前 5 就能看到。
+- 服务端按解析后的 `workspaceRoot` 缓存 60 秒（`LIST_CACHE_MS`），避免每次打开项目都重读转录；客户端另有 30 秒 staleTime。
 
 ### 2. 前端：项目内"全部会话"视图
 
@@ -72,8 +77,8 @@ interface AgentSessionSummary {
 
 | 项                  | 处理                                                                              |
 | ------------------- | --------------------------------------------------------------------------------- |
-| 大项目（100+ 会话） | 列表默认 200 条 + `truncated` 标记；每份转录只读前 32 KiB                         |
-| 打开项目即扫描      | 60 秒服务端缓存 + 客户端 30 秒 staleTime，复用现有 query 层                       |
+| 大项目（100+ 会话） | 每个项目只列最近 5 条 + `truncated` 标记；每份转录只读前 32 KiB                   |
+| 打开项目即扫描      | 60 秒服务端缓存（按路径）+ 客户端 30 秒 staleTime，复用现有 query 层              |
 | 远端环境            | RPC 属于 environment 范围，天然在目标机器执行；不要在客户端读本地路径             |
 | 未接管目录          | 只有 path 没有 projectId，`imported` 恒为 false，点击走"接管并导入"流程           |
 | 权限                | 读 scope 即可列出；导入需要 operate scope，沿用现有 `agentSessions.import` 的授权 |
@@ -83,7 +88,7 @@ interface AgentSessionSummary {
 1. **Cursor 转录里没有 cwd**：只能靠 slug 贪心解码，目录被重命名后解码失败 → 该会话从列表消失（不是错，是限制）。
 2. **Codex 子 agent rollout 不算独立会话**：现有 `extractCwd` 已按 `payload.source.subagent` 过滤，列表需保持同一规则。
 3. **标题质量**：Codex 的首条用户消息常带环境上下文，标题需走 `CODEX_TITLE_PREAMBLE` 剥离；否则一排会话全是 `<environment_context>`。
-4. **30 天窗口**：现有 `recentThreads` 的 `RECENT_THREAD_WINDOW_MS` 会隐藏老会话；列表视图必须绕开它，否则用户找不到三个月前的会话。
+4. **30 天窗口**：现有 `recentThreads` 的 `RECENT_THREAD_WINDOW_MS` 会隐藏老会话；`listSessions` 已绕开它，只按每项目最近 5 条截断。
 5. **qwenCode 无法续跑**（见上）。
 
 ## 分阶段

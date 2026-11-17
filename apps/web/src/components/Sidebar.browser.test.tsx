@@ -7,7 +7,9 @@ import {
   DEFAULT_CLIENT_SETTINGS,
   EnvironmentId,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
+  type AgentSessionListEntry,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { isMacPlatform } from "@t3tools/shared/keybindings";
@@ -62,6 +64,19 @@ vi.mock("./sidebar/SidebarChrome", () => ({
   SidebarChromeHeader: () => null,
   SidebarChromeFooter: () => null,
 }));
+
+// The CLI session list is a remote query; tests drive it with a fixed atom value.
+const cliSessionListMock = vi.hoisted(() => ({
+  sessions: [] as AgentSessionListEntry[],
+}));
+vi.mock(import("../state/agentSessions"), async (original) => {
+  const { AsyncResult, Atom } = await import("effect/reactivity");
+  return {
+    ...(await original()),
+    agentSessionList: () =>
+      Atom.make(AsyncResult.success({ sessions: cliSessionListMock.sessions })),
+  };
+});
 
 function project(id: string): Project {
   return {
@@ -482,5 +497,157 @@ describe("sidebar settled pagination", () => {
     const loadedRows = screen.container.querySelectorAll("[data-thread-item]").length;
     await act(() => moreButton.click());
     expect(screen.container.querySelectorAll("[data-thread-item]")).toHaveLength(loadedRows);
+  });
+});
+
+function cliSession(overrides: Partial<AgentSessionListEntry>): AgentSessionListEntry {
+  return {
+    source: "codex",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    providerSessionId: "cli-session-1",
+    title: null,
+    model: null,
+    lastActiveAtMs: 0,
+    filePath: null,
+    imported: false,
+    importable: true,
+    ...overrides,
+  };
+}
+
+async function renderProjectCliSessions(
+  stack: DisposableStack,
+  sessions: readonly AgentSessionListEntry[],
+) {
+  const settings = getClientSettings();
+  const uiState = useUiStateStore.getState();
+  const hostFilter = useSidebarHostFilter.getState();
+  stack.defer(() => __setClientSettingsForTests(settings));
+  stack.defer(() => useUiStateStore.setState(uiState, true));
+  stack.defer(() => useSidebarHostFilter.setState(hostFilter, true));
+  stack.defer(() => {
+    cliSessionListMock.sessions = [];
+  });
+  cliSessionListMock.sessions = [...sessions];
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    sidebarDisplayMode: "project-threads",
+  });
+  useSidebarHostFilter.getState().select(null);
+  useUiStateStore.setState({ projectExpandedById: {}, sidebarProjectScopeKeys: [] });
+  const activeProject = project("cli-sessions");
+  vi.mocked(useProjects).mockReturnValue([activeProject]);
+  vi.mocked(useQuietThreadShells).mockReturnValue([]);
+  vi.mocked(useNowMinute).mockReturnValue("2026-01-01T00:00");
+  vi.mocked(useThreadRouteTarget).mockReturnValue(null);
+  vi.mocked(useServerConfigs).mockReturnValue(
+    new Map([
+      [
+        activeProject.environmentId,
+        {
+          environment: { capabilities: {} },
+          settings: {},
+          scratchWorkspaceRoot: null,
+          shellThreadFamilies: false,
+        } as unknown as EnvironmentServerConfig,
+      ],
+    ]),
+  );
+  vi.mocked(useEnvironmentScope).mockReturnValue(true);
+  vi.mocked(readEnvironmentScope).mockReturnValue(true);
+  vi.mocked(useHandleNewThread).mockReturnValue({
+    activeDraftThread: null,
+    activeThread: null,
+    defaultProjectRef: {
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+    },
+    defaultProjectFallbackReady: true,
+    handleNewThread: vi.fn().mockResolvedValue(null),
+    routeDraftId: null,
+    routeThreadRef: null,
+  });
+  return render(
+    <SidebarProvider>
+      <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+    </SidebarProvider>,
+  );
+}
+
+const cliSessionRows = (container: HTMLElement) =>
+  Array.from(
+    container.querySelectorAll<HTMLElement>('[data-testid="sidebar-project-session-row"]'),
+  );
+
+describe("project cli sessions", () => {
+  it("renders one collapsed line until the section is opened", async () => {
+    using stack = new DisposableStack();
+    await using screen = await renderProjectCliSessions(stack, [
+      cliSession({ providerSessionId: "a", title: "First session" }),
+    ]);
+    const toggle = screen.getByTestId("sidebar-project-sessions-toggle");
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect.element(toggle).toHaveTextContent("CLI 会话 (1)");
+    expect(cliSessionRows(screen.container)).toHaveLength(0);
+
+    await userEvent.click(toggle);
+    await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(cliSessionRows(screen.container)).toHaveLength(1);
+  });
+
+  it("orders rows by last activity, newest first", async () => {
+    using stack = new DisposableStack();
+    await using screen = await renderProjectCliSessions(stack, [
+      cliSession({
+        providerSessionId: "oldest",
+        title: "Oldest session",
+        lastActiveAtMs: Date.parse("2026-01-01T00:00:10.000Z"),
+      }),
+      cliSession({
+        providerSessionId: "newest",
+        title: "Newest session",
+        lastActiveAtMs: Date.parse("2026-01-01T00:00:30.000Z"),
+      }),
+      cliSession({
+        providerSessionId: "middle",
+        title: "Middle session",
+        source: "cursor",
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        lastActiveAtMs: Date.parse("2026-01-01T00:00:20.000Z"),
+      }),
+    ]);
+    await userEvent.click(screen.getByTestId("sidebar-project-sessions-toggle"));
+    await expect.element(screen.getByText("Newest session", { exact: true })).toBeVisible();
+    expect(cliSessionRows(screen.container).map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Codex: Newest session",
+      "Cursor: Middle session",
+      "Codex: Oldest session",
+    ]);
+  });
+
+  it("disables a source without a driver and keeps importable rows clickable", async () => {
+    using stack = new DisposableStack();
+    await using screen = await renderProjectCliSessions(stack, [
+      cliSession({
+        providerSessionId: "qwen",
+        title: "Qwen history",
+        source: "qwenCode",
+        providerInstanceId: ProviderInstanceId.make("qwenCode"),
+        importable: false,
+        lastActiveAtMs: Date.parse("2026-01-01T00:00:20.000Z"),
+      }),
+      cliSession({
+        providerSessionId: "codex",
+        title: "Codex history",
+        lastActiveAtMs: Date.parse("2026-01-01T00:00:10.000Z"),
+      }),
+    ]);
+    await userEvent.click(screen.getByTestId("sidebar-project-sessions-toggle"));
+    const qwenRow = screen.getByRole("button", { name: "Qwen Code: Qwen history" });
+    await expect.element(qwenRow).toBeDisabled();
+    await expect.element(screen.getByText("仅历史", { exact: true })).toBeVisible();
+    await expect
+      .element(screen.getByRole("button", { name: "Codex: Codex history" }))
+      .toBeEnabled();
   });
 });

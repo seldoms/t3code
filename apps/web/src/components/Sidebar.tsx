@@ -57,8 +57,9 @@ import {
 import {
   AuthOrchestrationOperateScope,
   ProjectId,
+  ThreadId,
+  type AgentSessionListEntry,
   type ScopedThreadRef,
-  type ThreadId,
 } from "@t3tools/contracts";
 import {
   resolveListedAncestorThreadRef,
@@ -274,6 +275,7 @@ import {
   SidebarProjectFolderHeader,
   sidebarFolderRowId,
 } from "./sidebar/SidebarProjectFolderHeader";
+import { SidebarProjectSessions } from "./sidebar/SidebarProjectSessions";
 import {
   SidebarDragBoundary,
   SidebarSectionHeader,
@@ -1487,6 +1489,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return router.navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
+    });
+  };
+
+  // An import names its thread by origin, so opening one needs no lookup of the new rows.
+  const openCliSession = (input: {
+    environmentId: EnvironmentId;
+    providerInstanceId: AgentSessionListEntry["providerInstanceId"];
+    providerSessionId: string;
+  }) => {
+    void navigateToThread({
+      environmentId: input.environmentId,
+      threadId: ThreadId.make(`import:${input.providerInstanceId}:${input.providerSessionId}`),
     });
   };
 
@@ -3621,6 +3635,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                     sidebarFolderRowId(folder.group.projectKey),
                                   ),
                                 )}
+                                <SidebarProjectSessions
+                                  environmentId={folder.group.environmentId}
+                                  projectId={folder.group.id}
+                                  workspaceRoot={folder.group.workspaceRoot}
+                                  providerEntryByInstanceId={
+                                    providerEntriesByEnvironment.get(folder.group.environmentId) ??
+                                    EMPTY_PROVIDER_ENTRIES
+                                  }
+                                  navigationParent={sidebarFolderRowId(folder.group.projectKey)}
+                                  onOpenSession={openCliSession}
+                                />
                               </SidebarProjectFolderHeader>,
                             );
                           }
