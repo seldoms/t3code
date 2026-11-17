@@ -1,10 +1,6 @@
-export interface CpuCounters {
-  readonly total: number;
-  readonly idle: number;
-}
-
-export function parseRemoteProbe(output: string, alias: string, previous?: CpuCounters) {
-  const [hostname, platform, cores, load, memory, disk, cpuLine] = output
+/** Both CPU lines belong to one SSH probe; never subtract boot counters from an old cached sample. */
+export function parseRemoteProbe(output: string, alias: string) {
+  const [hostname, platform, cores, load, memory, disk, ...cpuLines] = output
     .trim()
     .split("\n")
     .map((line) => line.trim());
@@ -17,23 +13,26 @@ export function parseRemoteProbe(output: string, alias: string, previous?: CpuCo
   const diskUsed = (diskValues[1] ?? 0) * 1024;
   const diskAvail =
     diskValues[2] === undefined ? Math.max(0, diskTotal - diskUsed) : diskValues[2] * 1024;
-  // Linux guest counters are already included in user/nice; do not count them twice.
-  const ticks = cpuLine?.startsWith("cpu ") ? cpuLine.split(/\s+/).slice(1, 9).map(Number) : [];
-  const counters =
-    ticks.length >= 4 && ticks.every(Number.isFinite)
+  const counters = cpuLines.map((line) => {
+    const ticks = line.startsWith("cpu ") ? line.split(/\s+/).slice(1, 9).map(Number) : [];
+    // Linux guest time is already included in user/nice; do not count it twice.
+    return ticks.length >= 5 && ticks.every(Number.isFinite)
       ? {
           total: ticks.reduce((sum, tick) => sum + tick, 0),
           idle: (ticks[3] ?? 0) + (ticks[4] ?? 0),
         }
       : null;
-  const delta = counters && previous ? counters.total - previous.total : 0;
+  });
+  const first = counters[0];
+  const second = counters[1];
+  const delta = first && second ? second.total - first.total : 0;
   const cpu =
-    counters && previous && delta > 0 && counters.idle >= previous.idle
-      ? Math.round(Math.max(0, Math.min(100, 100 * (1 - (counters.idle - previous.idle) / delta))))
+    first && second && delta > 0 && second.idle >= first.idle
+      ? Math.round(Math.max(0, Math.min(100, 100 * (1 - (second.idle - first.idle) / delta))))
       : null;
   const loads = numbers(load);
   return {
-    counters,
+    counters: second,
     metrics: {
       host: hostname || alias,
       alias,

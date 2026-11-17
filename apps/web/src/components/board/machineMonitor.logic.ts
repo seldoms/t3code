@@ -11,6 +11,8 @@ export interface MonitoredMachine {
   readonly cpu: number | null;
   readonly memory: number | null;
   readonly disk: number | null;
+  readonly sampledAt: number | null;
+  readonly stale: boolean;
 }
 interface MonitorEnvironment {
   readonly environmentId: EnvironmentId;
@@ -26,6 +28,8 @@ const keyFor = (name: string) =>
     .trim()
     .toLowerCase()
     .replace(/\.(local|lan)$/, "");
+const sampleTime = (value: number | undefined, receivedAt?: number) => value ?? receivedAt ?? null;
+const staleAt = (at: number | null, now: number) => at !== null && now - at > 30_000;
 const percent = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
 
@@ -33,6 +37,7 @@ export function monitoredMachines(
   metrics: HostMetricsSnapshot | null,
   environments: ReadonlyArray<MonitorEnvironment>,
   localEnvironmentId: EnvironmentId | null,
+  now = Date.now(),
 ): MonitoredMachine[] {
   const matched = new Set<EnvironmentId>();
   const local = environments.find((entry) => entry.environmentId === localEnvironmentId);
@@ -48,6 +53,10 @@ export function monitoredMachines(
       cpu: percent(metrics?.cpu),
       memory: percent(metrics?.memPercent),
       disk: percent(metrics?.diskPercent),
+      sampledAt: sampleTime(metrics?.sampledAt, metrics?.receivedAt),
+      stale:
+        metrics?.error !== undefined ||
+        staleAt(sampleTime(metrics?.receivedAt, metrics?.sampledAt), now),
     },
   ];
   for (const remote of metrics?.remotes ?? []) {
@@ -73,6 +82,18 @@ export function monitoredMachines(
       cpu: remote.online ? percent(remote.cpu) : null,
       memory: remote.online ? percent(remote.memPercent) : null,
       disk: remote.online ? percent(remote.diskPercent) : null,
+      sampledAt: remote.sampledAt ?? null,
+      stale:
+        metrics?.error !== undefined ||
+        remote.error !== undefined ||
+        staleAt(metrics?.receivedAt ?? metrics?.sampledAt ?? null, now) ||
+        staleAt(
+          remote.sampledAt === undefined
+            ? null
+            : (metrics?.receivedAt ?? now) -
+                Math.max(0, (metrics?.sampledAt ?? now) - remote.sampledAt),
+          now,
+        ),
     });
   }
   for (const env of environments) {
@@ -87,6 +108,8 @@ export function monitoredMachines(
       cpu: null,
       memory: null,
       disk: null,
+      sampledAt: null,
+      stale: false,
     });
   }
   return machines;

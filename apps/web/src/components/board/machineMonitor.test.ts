@@ -4,15 +4,18 @@ import { machineConnectionLabel, monitoredMachines } from "./machineMonitor.logi
 import type { HostMetricsSnapshot } from "./useHostMetrics";
 
 it("merges matching remote metrics with connection identity without conflating SSH and T3", () => {
+  const now = 1_800_000_000_000;
   const metrics = {
     host: "Mac",
     cpu: 12,
+    sampledAt: now,
     memPercent: 50,
     diskPercent: 70,
     remotes: [
       {
         host: "P15.local",
         alias: "ubuntu",
+        sampledAt: now,
         online: true,
         cpu: 30,
         memPercent: 60,
@@ -35,10 +38,13 @@ it("merges matching remote metrics with connection identity without conflating S
       environment("vps", "VPS", "uslab", "connecting"),
     ],
     EnvironmentId.make("mac"),
+    now,
   );
   expect(rows).toHaveLength(4);
   expect(rows[1]?.environmentId).toBe("p15");
   expect(rows[1]?.cpu).toBe(30);
+  expect(rows[1]?.stale).toBe(false);
+  expect(rows[1]?.sampledAt).not.toBeNull();
   expect(machineConnectionLabel(rows[1]!)).toBe("T3 已连接");
   expect(machineConnectionLabel(rows[2]!)).toBe("SSH 未连接");
   expect(rows[3]?.cpu).toBeNull();
@@ -48,6 +54,29 @@ it("merges matching remote metrics with connection identity without conflating S
 });
 
 describe("machine metric values", () => {
+  it("marks old or failed remote snapshots instead of presenting them as live data", () => {
+    const now = 1_800_000_000_000;
+    const metrics = {
+      host: "Mac",
+      cpu: 12,
+      memPercent: 50,
+      diskPercent: 70,
+      sampledAt: now - 60_000,
+      remotes: [
+        {
+          host: "remote",
+          online: true,
+          cpu: 10,
+          memPercent: 40,
+          diskPercent: 50,
+          sampledAt: now - 60_000,
+        },
+      ],
+    } as unknown as HostMetricsSnapshot;
+    const rows = monitoredMachines(metrics, [], null, now);
+    expect(rows.every((row) => row.stale)).toBe(true);
+    expect(rows[1]?.cpu).toBe(10);
+  });
   it("shows missing data as unknown and clamps invalid percentages", () => {
     const one = monitoredMachines(null, [], null);
     expect(one).toHaveLength(1);

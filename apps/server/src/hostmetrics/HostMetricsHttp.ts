@@ -1,5 +1,6 @@
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import * as Effect from "effect/Effect";
+import * as Clock from "effect/Clock";
 import { AuthOrchestrationReadScope } from "@t3tools/contracts";
 
 import { authenticateRawRouteWithScope } from "../http.ts";
@@ -16,9 +17,18 @@ export const layerHostMetricsRoute = HttpRouter.add(
   "/api/host/metrics",
   Effect.gen(function* () {
     yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
-    const [metrics, remotes] = yield* Effect.all([sampleHostMetrics(), sampleRemoteHosts()]);
-    return HttpServerResponse.text(
-      JSON.stringify({ ...metrics, remotes, hostsConfigured: readPrivateSshHosts() }),
+    const [metrics, remotes, sampledAt] = yield* Effect.all([
+      sampleHostMetrics(),
+      sampleRemoteHosts(),
+      Clock.currentTimeMillis,
+    ]);
+    return yield* HttpServerResponse.json(
+      {
+        ...metrics,
+        sampledAt: Number(sampledAt),
+        remotes,
+        hostsConfigured: readPrivateSshHosts(),
+      },
       {
         status: 200,
         contentType: "application/json",

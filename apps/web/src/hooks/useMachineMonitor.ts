@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useClientSettings } from "./useSettings";
+import { useNowSecond } from "./useNowSecond";
 import { Atom } from "effect/reactivity";
 import { AuthOrchestrationReadScope, type EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
@@ -20,19 +21,20 @@ const resourcesByEnvironment = Atom.family((key: string) =>
     const values = ids.map((environmentId) => {
       const query = serverEnvironment.hostResources({ environmentId, input: {} });
       const result = get(query);
-      return { environmentId, data: result._tag === "Success" ? result.value : null };
+      return {
+        environmentId,
+        data: result._tag === "Success" ? result.value : null,
+        receivedAt: result._tag === "Success" ? result.timestamp : null,
+        error: result._tag === "Failure",
+      };
     });
-    const timer = setInterval(() => {
-      for (const environmentId of ids)
-        get.refresh(serverEnvironment.hostResources({ environmentId, input: {} }));
-    }, 5000);
-    get.addFinalizer(() => clearInterval(timer));
     return values;
   }),
 );
 
 export function useMachineMonitor() {
   const preferences = useClientSettings();
+  const now = useNowSecond();
   const metrics = useHostMetrics();
   const { environments } = useEnvironments();
   const primaryId = usePrimaryEnvironmentId();
@@ -55,7 +57,7 @@ export function useMachineMonitor() {
     let active = false;
     const controller = new AbortController();
     const load = async () => {
-      if (active) return;
+      if (active || cancelled) return;
       active = true;
       try {
         const entries = await Promise.all(
@@ -81,13 +83,23 @@ export function useMachineMonitor() {
               const data = (await response.json()) as HostMetricsSnapshot;
               if (typeof data.host !== "string" || typeof data.diskPercent !== "number")
                 return null;
-              return [id, data] as const;
+              return [id, { ...data, receivedAt: Date.now() }] as const;
             } catch {
               return null;
             }
           }),
         );
-        if (!cancelled) setDetails(new Map(entries.filter((entry) => entry !== null)));
+        if (!cancelled)
+          setDetails((previous) => {
+            const next = new Map<EnvironmentId, HostMetricsSnapshot>();
+            for (const id of ids) {
+              const fresh = entries.find((entry) => entry?.[0] === id);
+              const old = previous.get(id);
+              if (fresh) next.set(id, fresh[1]);
+              else if (old) next.set(id, { ...old, error: "refresh-failed" });
+            }
+            return next;
+          });
       } finally {
         active = false;
       }
@@ -108,7 +120,7 @@ export function useMachineMonitor() {
         .join("\n"),
     ),
   );
-  const rows = monitoredMachines(metrics, environments, primaryId);
+  const rows = monitoredMachines(metrics, environments, primaryId, now);
   return {
     metrics,
     allMachines: rows,
@@ -125,29 +137,28 @@ export function useMachineMonitor() {
         if (machine.local || !machine.environmentId || machine.connection !== "connected")
           return machine;
         const detail = details.get(machine.environmentId);
-        const resource = resources.find(
-          (entry) => entry.environmentId === machine.environmentId,
-        )?.data;
-        if (!resource && !detail) return machine;
-        if (!resource)
-          return {
-            ...machine,
-            cpu: detail?.cpu ?? machine.cpu,
-            memory: detail?.memPercent ?? machine.memory,
-            disk: detail?.diskPercent ?? machine.disk,
-          };
-        return {
-          ...machine,
-          disk: detail?.diskPercent ?? machine.disk,
-          cpu:
-            resource.cpuUtilization === null
-              ? machine.cpu
-              : Math.round(resource.cpuUtilization * 100),
-          memory:
-            resource.totalMemoryBytes > 0
-              ? Math.round((1 - resource.availableMemoryBytes / resource.totalMemoryBytes) * 100)
-              : machine.memory,
-        };
+        const sample = resources.find((entry) => entry.environmentId === machine.environmentId);
+        const resource = sample?.data;
+        const cpu =
+          resource?.cpuUtilization != null
+            ? Math.round(resource.cpuUtilization * 100)
+            : (detail?.cpu ?? machine.cpu);
+        const memory =
+          resource && resource.totalMemoryBytes > 0
+            ? Math.round((1 - resource.availableMemoryBytes / resource.totalMemoryBytes) * 100)
+            : (detail?.memPercent ?? machine.memory);
+        const disk = detail?.diskPercent ?? machine.disk;
+        const sampledAt =
+          resource?.sampledAt ?? detail?.sampledAt ?? detail?.receivedAt ?? machine.sampledAt;
+        const receivedAt = sample?.receivedAt ?? detail?.receivedAt ?? machine.sampledAt;
+        const stale =
+          (detail === undefined && machine.disk !== null && machine.stale) ||
+          sample?.error === true ||
+          detail?.error !== undefined ||
+          receivedAt === null ||
+          now - receivedAt > 30_000 ||
+          (detail?.receivedAt !== undefined && now - detail.receivedAt > 30_000);
+        return { ...machine, cpu, memory, disk, sampledAt, stale };
       }),
   };
 }

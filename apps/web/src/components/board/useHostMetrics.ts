@@ -14,6 +14,7 @@ export interface RemoteHostSnapshot {
   readonly memPercent?: number | null;
   readonly diskPercent?: number | null;
   readonly gpu?: number | null;
+  readonly sampledAt?: number;
 }
 
 export interface HostMetricsSnapshot {
@@ -30,6 +31,9 @@ export interface HostMetricsSnapshot {
   readonly diskPercent: number;
   readonly gpu: number | null;
   readonly uptimeSeconds: number;
+  readonly sampledAt?: number;
+  readonly receivedAt?: number;
+  readonly error?: string;
   readonly remotes?: ReadonlyArray<RemoteHostSnapshot>;
 }
 
@@ -52,21 +56,28 @@ export function useHostMetrics(): HostMetricsSnapshot | null {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- 轮询服务端 /api/host/metrics，把外部负载快照同步进 React，卸载即停
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setInterval> | null = null;
 
     const load = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
       try {
         const response = await primaryRawFetch(endpoint(), {
           headers: { accept: "application/json" },
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
         });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error("metrics-request-failed");
         const body: unknown = await response.json();
-        if (typeof body !== "object" || body === null) return;
+        if (typeof body !== "object" || body === null) throw new Error("invalid-metrics");
         const value = body as HostMetricsSnapshot;
-        if (typeof value.host !== "string") return;
-        if (!cancelled) setMetrics(value);
+        if (typeof value.host !== "string") throw new Error("invalid-metrics");
+        if (!cancelled) setMetrics({ ...value, receivedAt: Date.now() });
       } catch {
-        // 拿不到就保持上一次的数字，不闪成 0。
+        if (!cancelled) setMetrics((old) => (old ? { ...old, error: "refresh-failed" } : null));
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -74,6 +85,7 @@ export function useHostMetrics(): HostMetricsSnapshot | null {
     timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
       cancelled = true;
+      controller.abort();
       if (timer) clearInterval(timer);
     };
   }, []);

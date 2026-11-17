@@ -1846,6 +1846,7 @@ describe("resource telemetry history", () => {
   it.effect.each([
     ["resourceTelemetryHistory", WS_METHODS.serverGetResourceTelemetryHistory],
     ["processResourceHistory", WS_METHODS.serverGetProcessResourceHistory],
+    ["hostResources", WS_METHODS.serverGetHostResources],
   ] as const)(
     "%s refreshes an initially empty history while mounted and stops after unmount",
     ([atomKey, method]) =>
@@ -1902,23 +1903,21 @@ describe("resource telemetry history", () => {
                 Effect.sync(AtomRegistry.make),
                 (value) => Effect.sync(() => value.dispose()),
               );
-              const history: Atom.Atom<
-                AsyncResult.AsyncResult<{ readonly retainedSampleCount: number }, Error>
-              > = atoms[atomKey]({
+              const history = atoms[atomKey]({
                 environmentId: TARGET.environmentId,
                 input: { windowMs: 900_000, bucketMs: 30_000 },
-              });
+              }) as Atom.Atom<AsyncResult.AsyncResult<unknown, Error>>;
               const unmount = registry.mount(history);
-              const initial = yield* AtomRegistry.getResult(registry, history, {
+              yield* AtomRegistry.getResult(registry, history, {
                 suspendOnWaiting: true,
               });
-              expect(initial.retainedSampleCount).toBe(0);
+              expect(reads).toBe(1);
               yield* Effect.promise(() => vi.advanceTimersByTimeAsync(5_000));
               expect(reads).toBe(2);
-              const updated = yield* AtomRegistry.getResult(registry, history, {
+              yield* AtomRegistry.getResult(registry, history, {
                 suspendOnWaiting: true,
               });
-              expect(updated.retainedSampleCount).toBe(1);
+              expect(reads).toBe(2);
               unmount();
               yield* Effect.promise(() => vi.advanceTimersByTimeAsync(10_000));
               expect(reads).toBe(2);

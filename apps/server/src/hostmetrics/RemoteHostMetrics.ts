@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off -- 探针异步跑一条 ssh + 解析行文本，限并发 + single-flight，不阻塞主线程。
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off -- SSH边界记录采样时刻；探针异步限并发。
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
 import * as Clock from "effect/Clock";
-import { parseRemoteProbe, type CpuCounters } from "./remoteProbe.ts";
+import { parseRemoteProbe } from "./remoteProbe.ts";
 import * as Effect from "effect/Effect";
 
 import type { HostMetrics } from "./HostMetrics.ts";
@@ -20,18 +20,19 @@ const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
 
 const SSH_BIN = NodeFS.existsSync("/usr/bin/ssh") ? "/usr/bin/ssh" : "ssh";
 const CACHE_MS = 10_000;
-const SSH_TIMEOUT_MS = 2500;
+const SSH_TIMEOUT_MS = 5000;
 
 /** 一条命令拿齐需要的数字，远端只输出 KEY=VALUE。 */
 const PROBE = [
   "hostname",
   "uname -s",
   "nproc 2>/dev/null || sysctl -n hw.ncpu",
-  'cat /proc/loadavg 2>/dev/null | cut -d" " -f1-3 || sysctl -n vm.loadavg | tr -d "{}"',
+  `cat /proc/loadavg 2>/dev/null | cut -d" " -f1-3 || sysctl -n vm.loadavg | tr -d "{}"`,
   'cat /proc/meminfo 2>/dev/null | awk "/MemTotal/{t=\\$2}/MemAvailable/{a=\\$2}END{if(t>0)print t\\",\\"(t-a);else print \\"0,0\\"}" || echo "0,0"',
   `df -k / | tail -1 | awk '{print $2 "," $3 "," $4}'`,
-  'grep "cpu " /proc/stat 2>/dev/null | head -1',
-  "sysctl -n vm_stat 2>/dev/null | head -5",
+  `grep "^cpu " /proc/stat 2>/dev/null | head -1`,
+  `if command -v python3 >/dev/null 2>&1; then python3 -c "import time;time.sleep(0.2)"; else sleep 1; fi`,
+  `grep "^cpu " /proc/stat 2>/dev/null | head -1`,
 ].join("; ");
 
 export interface RemoteHostMetrics extends Omit<
@@ -44,11 +45,13 @@ export interface RemoteHostMetrics extends Omit<
   readonly host: string;
   readonly online: boolean;
   readonly error?: string;
+  readonly sampledAt?: number;
 }
 
 interface CacheEntry {
   readonly at: number;
   readonly value: RemoteHostMetrics;
+  readonly attemptedAt?: number;
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -80,9 +83,10 @@ export function readPrivateSshHosts(): ReadonlyArray<string> {
   }
 }
 
-const previousCpuByAlias = new Map<string, CpuCounters>();
-
-async function probeHost(alias: string): Promise<RemoteHostMetrics> {
+async function probeHost(
+  alias: string,
+  currentTimeMillis: () => number,
+): Promise<RemoteHostMetrics> {
   try {
     const { stdout: output } = await execFileAsync(
       SSH_BIN,
@@ -98,27 +102,26 @@ async function probeHost(alias: string): Promise<RemoteHostMetrics> {
       ],
       { encoding: "utf8", timeout: SSH_TIMEOUT_MS },
     );
-    const { metrics: parsed, counters } = parseRemoteProbe(
-      output,
-      alias,
-      previousCpuByAlias.get(alias),
-    );
-    if (counters) previousCpuByAlias.set(alias, counters);
+    const { metrics: parsed } = parseRemoteProbe(output, alias);
     console.log(`[hostmetrics] ${alias} → ${parsed.host}`);
-    return parsed;
+    return { ...parsed, sampledAt: currentTimeMillis() };
   } catch (error) {
     console.warn(`[hostmetrics] ${alias} 探测失败`, error instanceof Error ? error.message : error);
     return {
       host: alias,
       alias,
       online: false,
+      sampledAt: currentTimeMillis(),
       error: error instanceof Error ? error.message.slice(0, 120) : "probe-failed",
     };
   }
 }
 
 /** 限并发探测：离线主机再多也不会叠加出几十条 ssh。 */
-async function probeAll(hosts: ReadonlyArray<string>): Promise<RemoteHostMetrics[]> {
+async function probeAll(
+  hosts: ReadonlyArray<string>,
+  currentTimeMillis: () => number,
+): Promise<RemoteHostMetrics[]> {
   const results = new Array<RemoteHostMetrics>(hosts.length);
   let next = 0;
   const workers = Array.from({ length: Math.min(3, hosts.length) }, async () => {
@@ -126,7 +129,7 @@ async function probeAll(hosts: ReadonlyArray<string>): Promise<RemoteHostMetrics
       const index = next;
       next += 1;
       const alias = hosts[index];
-      if (alias !== undefined) results[index] = await probeHost(alias);
+      if (alias !== undefined) results[index] = await probeHost(alias, currentTimeMillis);
     }
   });
   await Promise.all(workers);
@@ -140,24 +143,37 @@ export const sampleRemoteHosts = Effect.fn("hostMetrics.remotes")(function* () {
   const hosts = readPrivateSshHosts();
   if (hosts.length === 0) return [] as ReadonlyArray<RemoteHostMetrics>;
 
-  const now = Number(yield* Clock.currentTimeMillis);
+  const clock = yield* Clock.Clock;
+  const currentTimeMillis = () => clock.currentTimeMillisUnsafe();
+  const now = currentTimeMillis();
   const missing = hosts.filter((host) => {
     const entry = cache.get(host);
-    return !entry || now - entry.at > CACHE_MS;
+    return !entry || now - (entry.attemptedAt ?? entry.at) >= CACHE_MS;
   });
 
   if (missing.length > 0) {
     // single-flight：并发请求共用一轮探测，缓存写回按别名存。
     if (!inFlight) {
       const batch = missing;
-      inFlight = probeAll(batch)
+      inFlight = probeAll(batch, currentTimeMillis)
         .then((results) => {
-          const stampedAt = now;
+          const stampedAt = currentTimeMillis();
           for (const [index, result] of results.entries()) {
             const alias = batch[index];
             // 缓存一定要按「别名」存：探测成功时 value.host 是对方的 hostname，
             // 用它当键会让别名查不到、主机在看板上静默消失（这个 bug 现场抓到的）。
-            if (alias !== undefined) cache.set(alias, { at: stampedAt, value: result });
+            if (alias !== undefined) {
+              const old = cache.get(alias);
+              cache.set(alias, {
+                at: result.online ? stampedAt : (old?.at ?? stampedAt),
+                attemptedAt: stampedAt,
+                value: result.online
+                  ? result
+                  : old?.value
+                    ? { ...old.value, error: result.error ?? "probe-failed" }
+                    : result,
+              });
+            }
           }
         })
         .finally(() => {

@@ -37,7 +37,9 @@ function MachineRow({
   single,
   onProjects,
   selected,
+  compact,
 }: {
+  compact: boolean;
   selected: boolean;
   machine: MonitoredMachine;
   color: MachineColor;
@@ -98,14 +100,22 @@ function MachineRow({
       {open ? (
         <div className="space-y-1.5 px-1 pb-2">
           <p
-            className={`text-3xs ${machine.reachable === false ? "text-warning" : "text-muted-foreground"}`}
+            className={`text-3xs ${machine.reachable === false || machine.stale ? "text-warning" : "text-muted-foreground"}`}
           >
             {label}
+            {machine.sampledAt !== null
+              ? ` · ${machine.stale ? "旧快照" : "采样"} ${new Date(machine.sampledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+              : ""}
           </p>
           <LoadMeter label="CPU" value={machine.cpu} />
           <LoadMeter label="内存" value={machine.memory} />
           <LoadMeter label="硬盘" value={machine.disk} />
-          {machine.cpu === null && machine.reachable ? (
+          {machine.stale && !compact ? (
+            <p className="text-3xs text-warning">
+              指标更新失败或已过期，下方不是实时数据；连接恢复后将自动重试。
+            </p>
+          ) : null}
+          {!compact && machine.cpu === null && machine.reachable ? (
             <p className="text-3xs text-muted-foreground">
               CPU 等待下一次有效采样，不用平均负载冒充百分比。
             </p>
@@ -121,7 +131,9 @@ export function MachineMonitor({
   colorFor,
   onProjects,
   selectedHostKey = null,
+  compact = false,
 }: {
+  compact?: boolean;
   selectedHostKey?: string | null;
   machines: ReadonlyArray<MonitoredMachine>;
   colorFor: (machine: MonitoredMachine) => MachineColor;
@@ -130,12 +142,14 @@ export function MachineMonitor({
   if (machines.length === 0) return null;
   return (
     <div className="min-w-0" aria-label="机器负载监控">
-      <p className="mb-1 text-3xs text-muted-foreground">
-        {onProjects
-          ? "点击主机查看负载，点「项目」发起对话。"
-          : "点击主机查看 CPU、内存和硬盘负载。"}
-      </p>
-      {machines.length > 1 ? (
+      {!compact ? (
+        <p className="mb-1 text-3xs text-muted-foreground">
+          {onProjects
+            ? "点击主机查看负载，点「项目」发起对话。"
+            : "点击主机查看 CPU、内存和硬盘负载。"}
+        </p>
+      ) : null}
+      {!compact && machines.length > 1 ? (
         <div className="mb-0.5 flex text-3xs text-muted-foreground">
           <span>主机 · 点击展开</span>
           <span className="ml-auto">C CPU% · M 内存% · D 硬盘%</span>
@@ -149,6 +163,7 @@ export function MachineMonitor({
           single={machines.length === 1}
           onProjects={onProjects}
           selected={selectedHostKey === machine.key}
+          compact={compact}
         />
       ))}
     </div>
