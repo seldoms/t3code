@@ -2130,7 +2130,8 @@ export const make = Effect.gen(function* () {
     string,
     { readonly at: number; readonly result: AgentSessionListResult }
   >();
-  const MAX_LISTED_TRANSCRIPTS = 50;
+  // 侧栏只展示最近几条，更早的不值得读转录；需要时再加"显示更多"。
+  const MAX_LISTED_TRANSCRIPTS = 5;
   const LIST_CACHE_MS = 60_000;
   // 有 provider driver 的来源才能在 T3 里继续；qwenCode 只能看历史。
   const IMPORTABLE_SOURCES: ReadonlySet<AgentSessionSource> = new Set([
