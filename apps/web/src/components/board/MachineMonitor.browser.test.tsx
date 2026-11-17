@@ -54,7 +54,7 @@ const remote: MonitoredMachine = {
 it("expands a single machine, switches to one-row-per-host for multiple machines, and restores details on demand", async () => {
   await page.viewport(1280, 800);
   using _time = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
-  const colorFor = () => "green" as const;
+  const colorFor = () => "slate" as const;
   const container = document.createElement("div");
   container.style.width = "320px";
   await using screen = await render(<MachineMonitor machines={[local]} colorFor={colorFor} />, {
@@ -106,7 +106,7 @@ it("expands a single machine, switches to one-row-per-host for multiple machines
   expect(screen.container.textContent).not.toContain("旧快照");
 });
 
-const dotColor = () => "green" as const;
+const dotColor = () => "slate" as const;
 
 it("stays silent while the machine is healthy and never prints a sampling timestamp", async () => {
   await using screen = await render(<MachineMonitor machines={[local]} colorFor={dotColor} />);

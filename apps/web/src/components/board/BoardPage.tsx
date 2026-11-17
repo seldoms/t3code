@@ -7,7 +7,7 @@ import { AuthOrchestrationOperateScope, EnvironmentId } from "@t3tools/contracts
 import { useStartProjectThread } from "../../hooks/useStartProjectThread";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { resolveSnapshotEnvironment } from "./projectThreadTarget";
-import { useEnvironmentColors } from "../../environmentColors";
+import { MACHINE_COLOR_ORDER, useEnvironmentColors } from "../../environmentColors";
 import { EnvironmentColorDot } from "../EnvironmentColorDot";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { LayoutGridIcon, Rows3Icon } from "lucide-react";
@@ -176,9 +176,7 @@ export function BoardPage() {
     );
     if (env) return environmentColors.get(env.environmentId) ?? "gray";
     const index = projwall.remotes.findIndex((entry) => entry.label === label);
-    return (
-      (["blue", "orange", "purple", "cyan", "pink", "yellow", "red"] as const)[index] ?? "gray"
-    );
+    return MACHINE_COLOR_ORDER[index] ?? "gray";
   };
   const navigate = useNavigate();
   const search = boardRoute.useSearch();
@@ -380,7 +378,9 @@ export function BoardPage() {
       environmentId: primaryEnvironmentId,
       title: project.name,
       machineId: "local",
-      machineColor: "green",
+      machineColor:
+        (primaryEnvironmentId === null ? undefined : environmentColors.get(primaryEnvironmentId)) ??
+        "gray",
       machineLabel: localLabel,
       machineOnline: true,
       path,

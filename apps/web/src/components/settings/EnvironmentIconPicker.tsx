@@ -13,8 +13,8 @@ import {
 
 import {
   ENVIRONMENT_COLOR_LABELS,
+  useEnvironmentColorChoices,
   useEnvironmentColors,
-  useIsLocalEnvironment,
 } from "../../environmentColors";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { useEnvironmentScope } from "../../state/session";
@@ -108,8 +108,8 @@ export function EnvironmentIconMenu({
 }
 
 /**
- * 机器标识色子菜单：本地固定绿色（禁改），远程机器从调色板里挑，
- * 已被别的机器占用的颜色禁选，避免两台机器同色分不清。
+ * 机器标识色子菜单：本机和远程一样能挑素色。
+ * 只有别的机器「显式选过」的颜色才禁选；自动分配的颜色会让位给用户的选择。
  */
 export function EnvironmentColorMenu({
   environmentId,
@@ -118,10 +118,12 @@ export function EnvironmentColorMenu({
   readonly environmentId: EnvironmentId;
   readonly serverConfig: EnvironmentMenuConfig | null;
 }) {
-  const isLocal = useIsLocalEnvironment(environmentId);
   const colors = useEnvironmentColors();
+  const choices = useEnvironmentColorChoices();
   const takenColors = new Set(
-    [...colors.entries()].filter(([id]) => id !== environmentId).map(([, color]) => color),
+    [...choices.entries()]
+      .filter(([id, color]) => id !== environmentId && color !== null)
+      .map(([, color]) => color),
   );
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const operateAccess = useEnvironmentScope(environmentId, AuthSettingsWriteScope)
@@ -133,7 +135,7 @@ export function EnvironmentColorMenu({
   return (
     <MenuSub>
       <MenuSubTrigger>
-        <EnvironmentColorDot color={current ?? (isLocal ? "green" : "gray")} />
+        <EnvironmentColorDot color={current} />
         颜色
       </MenuSubTrigger>
       <MenuSubPopup>
@@ -146,12 +148,10 @@ export function EnvironmentColorMenu({
           </>
         ) : null}
         <MenuRadioGroup
-          value={current ?? ""}
+          value={current}
           onValueChange={(next) => {
             if (
               lock !== null ||
-              isLocal ||
-              next === "green" ||
               takenColors.has(next as EnvironmentColorKind) ||
               !isEnvironmentColorKind(next)
             )
@@ -161,20 +161,12 @@ export function EnvironmentColorMenu({
         >
           {ENVIRONMENT_COLOR_KINDS.map((kind) => {
             const isTaken = takenColors.has(kind) && kind !== current;
-            const reserved = isLocal || kind === "green";
             return (
-              <MenuRadioItem
-                key={kind}
-                value={kind}
-                disabled={lock !== null || isTaken || reserved}
-              >
+              <MenuRadioItem key={kind} value={kind} disabled={lock !== null || isTaken}>
                 <span className="flex min-w-0 items-center gap-2">
                   <EnvironmentColorDot color={kind} className="size-3.5 shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{ENVIRONMENT_COLOR_LABELS[kind]}</span>
-                  {kind === "green" ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">本地</span>
-                  ) : null}
-                  {isTaken && !reserved ? (
+                  {isTaken ? (
                     <span className="shrink-0 text-xs text-muted-foreground">已被占用</span>
                   ) : null}
                 </span>

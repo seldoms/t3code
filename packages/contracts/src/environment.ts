@@ -44,16 +44,16 @@ export const EnvironmentMachineKind = Schema.Literals(ENVIRONMENT_MACHINE_KINDS)
 export type EnvironmentMachineKind = typeof EnvironmentMachineKind.Type;
 export const isEnvironmentMachineKind = Schema.is(EnvironmentMachineKind);
 
-/** 机器标识色：本地固定绿色，远程机器在设置里挑（前端拒绝重复）。 */
+/** 机器标识色：素色板，刻意避开红/绿/黄这类状态色，免得色点被读成告警。本机和远程都能挑。 */
 export const ENVIRONMENT_COLOR_KINDS = [
-  "green",
-  "blue",
-  "orange",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "red",
+  "slate",
+  "stone",
+  "steel",
+  "indigo",
+  "mauve",
+  "ink",
+  "clay",
+  "rose",
 ] as const;
 export const EnvironmentColorKind = Schema.Literals(ENVIRONMENT_COLOR_KINDS);
 export type EnvironmentColorKind = typeof EnvironmentColorKind.Type;

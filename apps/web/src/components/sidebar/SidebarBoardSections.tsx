@@ -75,11 +75,7 @@ export function SidebarBoardSections() {
         meterStyle={settings.monitorStyle}
         statusText={settings.monitorStatusText}
         colorFor={(machine) =>
-          machine.local
-            ? "green"
-            : machine.environmentId
-              ? (colors.get(machine.environmentId) ?? "gray")
-              : "gray"
+          machine.environmentId ? (colors.get(machine.environmentId) ?? "gray") : "gray"
         }
         selectedHostKey={hostFilter?.key ?? null}
         onProjects={(machine) =>
