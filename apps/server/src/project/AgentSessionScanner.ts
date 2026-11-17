@@ -7,6 +7,8 @@ import * as NodeZlib from "node:zlib";
 
 import {
   AgentSessionImportSource,
+  AgentSessionListResult,
+  type AgentSessionListInput,
   AgentSessionScanError,
   ClaudeSettings,
   CodexSettings,
@@ -261,6 +263,10 @@ export class AgentSessionScanner extends Context.Service<
   AgentSessionScanner,
   {
     readonly scan: Effect.Effect<AgentSessionScanResult, AgentSessionScanError>;
+    /** 项目内所有来源的会话，纯时间倒序；只读，不消耗导入预算。 */
+    readonly listSessions: (
+      input: AgentSessionListInput,
+    ) => Effect.Effect<AgentSessionListResult, AgentSessionScanError>;
     readonly recentThreads: (
       workspaceRoot: string,
       completedSources?: ReadonlyArray<AgentSessionImportSource>,
@@ -2119,6 +2125,104 @@ export const make = Effect.gen(function* () {
 
   let cachedCandidates: Effect.Success<ReturnType<typeof collectCandidates>> | null = null;
 
+  // 打开项目就重读几十份转录太贵；同一路径 60 秒内复用结果。
+  const sessionListCache = new Map<
+    string,
+    { readonly at: number; readonly result: AgentSessionListResult }
+  >();
+  const MAX_LISTED_TRANSCRIPTS = 50;
+  const LIST_CACHE_MS = 60_000;
+  // 有 provider driver 的来源才能在 T3 里继续；qwenCode 只能看历史。
+  const IMPORTABLE_SOURCES: ReadonlySet<AgentSessionSource> = new Set([
+    "claudeAgent",
+    "codex",
+    "pi",
+    "cursor",
+    "opencode",
+  ]);
+
+  const listSessions = Effect.fn("AgentSessionScanner.listSessions")(function* (
+    input: AgentSessionListInput,
+  ) {
+    const target = path.resolve(expandHomePath(input.workspaceRoot, homeDir));
+    const now = yield* Clock.currentTimeMillis;
+    const cached = sessionListCache.get(target);
+    if (cached !== undefined && now - cached.at < LIST_CACHE_MS) return cached.result;
+
+    if (cachedCandidates === null) cachedCandidates = yield* collectCandidates();
+    const runtimeRows = yield* runtimes
+      .list()
+      .pipe(
+        Effect.mapError(
+          (cause) => new AgentSessionScanError({ operation: "read-projects", cause }),
+        ),
+      );
+    const importedKeys = new Set(
+      runtimeRows.flatMap((runtime) => {
+        const payload = decodeImportedTranscriptPayload(runtime.runtimePayload);
+        if (Option.isNone(payload) || payload.value.importedTranscripts === undefined) return [];
+        return payload.value.importedTranscripts.map(
+          (source) => `${source.providerInstanceId}\u0000${source.providerSessionId}`,
+        );
+      }),
+    );
+
+    const matching = cachedCandidates.candidates.filter(
+      (candidate) => path.resolve(expandHomePath(candidate.cwd.trim(), homeDir)) === target,
+    );
+    const sessions: Array<AgentSessionListResult["sessions"][number]> = [];
+    let truncated = cachedCandidates.truncated;
+    for (const candidate of matching) {
+      const transcripts = [...candidate.transcripts]
+        .sort((left, right) => (right.mtimeMs ?? 0) - (left.mtimeMs ?? 0))
+        .slice(0, MAX_LISTED_TRANSCRIPTS);
+      if (candidate.transcripts.length > MAX_LISTED_TRANSCRIPTS) truncated = true;
+      for (const transcript of transcripts) {
+        const stats = yield* statOption(transcript.filePath);
+        if (Option.isNone(stats) || stats.value.type !== "File") continue;
+        const identity = transcriptIdentity(transcript.filePath, stats.value);
+        const snapshot = yield* readTranscript(transcript.filePath, identity, candidate.source);
+        if (snapshot === null || Option.isNone(snapshot.cwd)) continue;
+        const fallbackSessionId = path
+          .basename(transcript.filePath)
+          .replace(COMPRESSED_TRANSCRIPT_SUFFIX, "")
+          .replace(/\.jsonl$/u, "");
+        const thread = parseAgentSessionRecords(
+          {
+            source: candidate.source,
+            providerInstanceId: candidate.providerInstanceId,
+            fallbackSessionId,
+            lastActiveAtMs: transcript.mtimeMs ?? now,
+          },
+          snapshot.records,
+          snapshot.claudeFields,
+          snapshot.droppedMessageCount,
+        );
+        if (thread === null || thread === "empty") continue;
+        sessions.push({
+          source: candidate.source,
+          providerInstanceId: candidate.providerInstanceId,
+          providerSessionId: thread.providerSessionId,
+          title: thread.title.trim().length === 0 ? null : thread.title,
+          model: thread.model,
+          lastActiveAtMs: transcript.mtimeMs ?? now,
+          filePath: transcript.filePath,
+          imported: importedKeys.has(
+            `${candidate.providerInstanceId}\u0000${thread.providerSessionId}`,
+          ),
+          importable: IMPORTABLE_SOURCES.has(candidate.source),
+        });
+      }
+    }
+    sessions.sort((left, right) => right.lastActiveAtMs - left.lastActiveAtMs);
+    const result: AgentSessionListResult = {
+      sessions,
+      ...(truncated ? { truncated: true as const } : {}),
+    };
+    sessionListCache.set(target, { at: now, result });
+    return result;
+  });
+
   const scan: AgentSessionScanner["Service"]["scan"] = Effect.gen(function* () {
     cachedCandidates = yield* collectCandidates();
     const { candidates: raw, truncated } = cachedCandidates;
@@ -2494,7 +2598,7 @@ export const make = Effect.gen(function* () {
     completedSources = [],
   ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources));
 
-  return AgentSessionScanner.of({ scan, recentThreads });
+  return AgentSessionScanner.of({ scan, listSessions, recentThreads });
 });
 
 export const layer = Layer.effect(AgentSessionScanner, make).pipe(

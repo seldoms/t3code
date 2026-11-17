@@ -98,6 +98,8 @@ import {
   AgentSessionImportProjectNotFoundError,
   AgentSessionImportResult,
   AgentSessionScanInput,
+  AgentSessionListInput,
+  AgentSessionListResult,
   AgentSessionScanResult,
   AgentSessionScanError,
 } from "./agentSessions.ts";
@@ -431,6 +433,7 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
+  agentSessionsList: "agentSessions.list",
   agentSessionsImport: "agentSessions.import",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
@@ -1455,6 +1458,12 @@ const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
   error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
 });
 
+const WsAgentSessionsListRpc = Rpc.make(WS_METHODS.agentSessionsList, {
+  payload: AgentSessionListInput,
+  success: AgentSessionListResult,
+  error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   payload: AgentSessionImportInput,
   success: AgentSessionImportResult,
@@ -2246,6 +2255,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsFilesystemGetMetadataRpc,
   WsAgentSessionsScanRpc,
+  WsAgentSessionsListRpc,
   WsAgentSessionsImportRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,

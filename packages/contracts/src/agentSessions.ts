@@ -55,6 +55,31 @@ export const AgentSessionScanResult = Schema.Struct({
 });
 export type AgentSessionScanResult = typeof AgentSessionScanResult.Type;
 
+export const AgentSessionListInput = Schema.Struct({
+  workspaceRoot: TrimmedNonEmptyString,
+});
+export type AgentSessionListInput = typeof AgentSessionListInput.Type;
+
+/** 一条 CLI 原生会话，用于项目内统一时间线；imported 表示 T3 已收编。 */
+export const AgentSessionListEntry = Schema.Struct({
+  source: AgentSessionSource,
+  providerInstanceId: ProviderInstanceId,
+  providerSessionId: TrimmedNonEmptyString,
+  title: Schema.NullOr(Schema.String),
+  model: Schema.NullOr(Schema.String),
+  lastActiveAtMs: NonNegativeInt,
+  filePath: Schema.NullOr(Schema.String),
+  imported: Schema.Boolean,
+  importable: Schema.Boolean,
+});
+export type AgentSessionListEntry = typeof AgentSessionListEntry.Type;
+
+export const AgentSessionListResult = Schema.Struct({
+  sessions: Schema.Array(AgentSessionListEntry),
+  truncated: Schema.optional(Schema.Boolean),
+});
+export type AgentSessionListResult = typeof AgentSessionListResult.Type;
+
 export const AgentSessionImportInput = Schema.Struct({
   projectId: ProjectId,
   expectedWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
