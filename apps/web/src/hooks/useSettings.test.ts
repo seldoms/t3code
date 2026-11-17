@@ -98,7 +98,7 @@ describe("client settings hydration", () => {
     expect(persistenceMocks.getClientSettings).toHaveBeenCalledTimes(2);
   });
 
-  it("holds patches until a pending read supplies the saved preferences", async () => {
+  it("publishes a patch at once and keeps it when the pending read lands", async () => {
     let finishRead!: (settings: ClientSettings) => void;
     persistenceMocks.getClientSettings.mockImplementationOnce(
       () =>
@@ -114,11 +114,13 @@ describe("client settings hydration", () => {
 
     const hydration = ensureClientSettingsHydrated();
     persistClientSettingsPatch({ wordWrap: false });
-    expect(getClientSettings()).toBe(DEFAULT_CLIENT_SETTINGS);
+    // 点击必须立刻生效；等 hydration 才发布的话，一次慢读取就把整页开关点哑了。
+    expect(getClientSettings().wordWrap).toBe(false);
     expect(persistenceMocks.setClientSettings).not.toHaveBeenCalled();
 
     finishRead(savedSettings);
     await hydration;
+    expect(getClientSettings().wordWrap).toBe(false);
     await expect(persisted).resolves.toEqual({ ...savedSettings, wordWrap: false });
     expect(persistenceMocks.getClientSettings).toHaveBeenCalledOnce();
   });

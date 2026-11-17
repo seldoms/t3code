@@ -75,7 +75,8 @@ let clientSettingsHydrationStatus: ClientSettingsHydrationStatus = "pending";
 let clientSettingsHydrationPromise: Promise<void> | null = null;
 let clientSettingsHydrationGeneration = 0;
 let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
-let deferredClientSettingsPatchCount = 0;
+// 已发布、还没落盘的补丁。hydration/别的标签页回读时垫在最上层，避免把刚点的开关抹回去。
+let pendingClientSettingsPatch: ClientSettingsPatch = {};
 let unsubscribeOtherTabClientSettings: (() => void) | null = null;
 
 function emitClientSettingsChange() {
@@ -152,7 +153,11 @@ async function hydrateClientSettings(): Promise<void> {
         return;
       }
       if (persistedSettings) {
-        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+        replaceClientSettingsSnapshot({
+          ...DEFAULT_CLIENT_SETTINGS,
+          ...persistedSettings,
+          ...pendingClientSettingsPatch,
+        });
       }
       unsubscribeOtherTabClientSettings ??= subscribeBrowserClientSettingsWrites(
         refreshClientSettingsFromOtherTab,
@@ -184,7 +189,11 @@ function refreshClientSettingsFromOtherTab(): void {
   void enqueueClientSettingsPersistence(async () => {
     const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
     if (persistedSettings) {
-      replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+      replaceClientSettingsSnapshot({
+        ...DEFAULT_CLIENT_SETTINGS,
+        ...persistedSettings,
+        ...pendingClientSettingsPatch,
+      });
     }
   }).catch((error) => {
     console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} refresh failed`, {
@@ -210,23 +219,12 @@ export function persistClientSettingsPatch(
   patch: ClientSettingsPatch,
   persist: (settings: ClientSettings) => Promise<void> = defaultClientSettingsPersistence,
 ): Promise<void> {
-  // Patches queued before hydration must publish before newer optimistic patches.
-  const deferPatch =
-    clientSettingsHydrationStatus !== "ready" || deferredClientSettingsPatchCount > 0;
-  if (deferPatch) {
-    deferredClientSettingsPatchCount += 1;
-  } else {
-    replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
-  }
+  // 先无条件发布：以前 hydration 没就绪就整段跳过乐观更新，一次慢读取会让整页开关点了没反应。
+  pendingClientSettingsPatch = { ...pendingClientSettingsPatch, ...patch };
+  replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
   return enqueueClientSettingsPersistence(async () => {
-    if (deferPatch) {
-      try {
-        if (clientSettingsHydrationStatus !== "ready") {
-          await hydrateClientSettings();
-        }
-      } finally {
-        deferredClientSettingsPatchCount -= 1;
-      }
+    if (clientSettingsHydrationStatus !== "ready") {
+      await hydrateClientSettings();
     }
     // Also reapplies an optimistic patch that a refresh from another tab replaced.
     const current = getClientSettingsSnapshot();
@@ -236,6 +234,11 @@ export function persistClientSettingsPatch(
       replaceClientSettingsSnapshot({ ...current, ...patch });
     }
     await persist(getClientSettingsSnapshot());
+    // 落盘后只清掉没被后续点击覆盖的键，仍然新的那些继续护着。
+    for (const [key, value] of Object.entries(patch)) {
+      const pending = pendingClientSettingsPatch as Record<string, unknown>;
+      if (pending[key] === value) delete pending[key];
+    }
   }).catch((error) => {
     console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} persist failed`, {
       operation: "persist",
@@ -779,7 +782,7 @@ export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsHydrationStatus = "pending";
   clientSettingsHydrationPromise = null;
   clientSettingsPersistenceQueue = Promise.resolve();
-  deferredClientSettingsPatchCount = 0;
+  pendingClientSettingsPatch = {};
   unsubscribeOtherTabClientSettings?.();
   unsubscribeOtherTabClientSettings = null;
   clientSettingsListeners.clear();
