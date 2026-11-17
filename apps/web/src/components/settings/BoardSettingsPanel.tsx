@@ -111,20 +111,8 @@ export function BoardSettingsPanel() {
             </Select>
           }
         />
-        <SettingsRow
-          devicePreference
-          title="显示目录快捷筛选"
-          description="可选的高级筛选入口，不再与项目、对话混排。"
-          control={
-            <Switch
-              checked={settings.boardSidebarDirs}
-              onCheckedChange={(checked) => update({ boardSidebarDirs: checked })}
-              aria-label="显示业务目录"
-            />
-          }
-        />
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          机器负载始终显示。单机默认展开，多机默认每台一行；点击主机名查看 CPU、内存和硬盘进度条。
+          监控按上方显示范围生效。侧栏只保留机器、项目和对话状态；扫描目录与接管操作在项目板中管理。
         </p>
       </SettingsSection>
 

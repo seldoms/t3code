@@ -213,7 +213,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - Project-tree mode nests drafts and every thread state under the project; collapsing hides the entire subtree, including the active conversation. Flat thread mode keeps its shelves.
 - `sidebarHostFilter.ts` is the single host scope for project groups, threads and search. Null means all; selecting the same host clears it. Filter before logical project grouping so a local representative never starts work on behalf of a remote selection.
-- Keep monitoring and project selection separate: selecting a host filters the one project tree, not a second list of registered projects inside monitoring.
+- Keep monitoring and project selection separate: selecting a host filters the one project tree. Sidebar space is reserved for machine, project and thread status; scanned/unmanaged directories and directory filters belong on the board, not in monitoring.
 
 ## Local fork monitoring
 
