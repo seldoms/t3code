@@ -651,3 +651,73 @@ describe("project cli sessions", () => {
       .toBeEnabled();
   });
 });
+
+describe("archived projects", () => {
+  it("keeps the archived list below every project folder", async () => {
+    using stack = new DisposableStack();
+    const settings = getClientSettings();
+    const filter = useSidebarHostFilter.getState();
+    const ui = useUiStateStore.getState();
+    stack.defer(() => __setClientSettingsForTests(settings));
+    stack.defer(() => useSidebarHostFilter.setState(filter, true));
+    stack.defer(() => useUiStateStore.setState(ui, true));
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      sidebarDisplayMode: "project-threads",
+    });
+    useSidebarHostFilter.getState().select(null);
+    useUiStateStore.setState({ projectExpandedById: {}, sidebarProjectScopeKeys: [] });
+    const visible = project("Visible Project");
+    const blocked = {
+      ...project("Blocked Project"),
+      archivedAt: "2026-01-01T00:00:00.000Z",
+    };
+    vi.mocked(useProjects).mockReturnValue([blocked, visible]);
+    vi.mocked(useQuietThreadShells).mockReturnValue([
+      makeThreadFixture({
+        environmentId: visible.environmentId,
+        projectId: visible.id,
+        id: ThreadId.make("visible-thread"),
+        title: "Visible conversation",
+      }),
+    ]);
+    vi.mocked(useNowMinute).mockReturnValue("2026-01-01T00:00");
+    vi.mocked(useThreadRouteTarget).mockReturnValue(null);
+    vi.mocked(useServerConfigs).mockReturnValue(
+      new Map([
+        [
+          visible.environmentId,
+          {
+            environment: { capabilities: {} },
+            settings: {},
+            scratchWorkspaceRoot: null,
+            shellThreadFamilies: false,
+          } as unknown as EnvironmentServerConfig,
+        ],
+      ]),
+    );
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: { environmentId: visible.environmentId, projectId: visible.id },
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: null,
+    });
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+    const folder = screen.getByRole("button", { name: /^Visible Project/ });
+    await expect.element(folder).toBeVisible();
+    const archived = screen.getByTestId("sidebar-archived-projects");
+    await expect.element(archived).toBeInTheDocument();
+    // 屏蔽就是为了不看见：这块必须排在项目文件夹之后，而不是列表第一行。
+    const position = folder.element().compareDocumentPosition(archived.element());
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(archived.getByText("已屏蔽项目"));
+    await expect.element(screen.getByText("Blocked Project", { exact: true })).toBeVisible();
+  });
+});

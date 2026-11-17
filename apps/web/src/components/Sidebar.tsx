@@ -3279,26 +3279,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 ))}
               </ul>
             ) : null}
-            {projectGroups.some((group) => group.archived) ? (
-              <details className="px-2 text-2xs text-sidebar-muted-foreground">
-                <summary>已屏蔽项目</summary>
-                {projectGroups
-                  .filter((group) => group.archived)
-                  .map((group) => (
-                    <div key={group.projectKey} className="flex items-center gap-2 py-1">
-                      <span className="truncate">{group.displayName}</span>
-                      <button
-                        type="button"
-                        disabled={!canPinProject(group)}
-                        onClick={() => archiveProject(group)}
-                        className="ml-auto"
-                      >
-                        恢复
-                      </button>
-                    </div>
-                  ))}
-              </details>
-            ) : null}
           </SidebarGroup>
         ) : null}
         <SidebarGroup
@@ -3797,6 +3777,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             </TooltipProvider>
           ) : null}
         </SidebarGroup>
+        {/* 屏蔽就是为了不看见，所以这块永远排在项目/对话列表之后。 */}
+        {!isSearchingThreads && projectGroups.some((group) => group.archived) ? (
+          <SidebarGroup className="shrink-0">
+            <details
+              className="px-2 text-2xs text-sidebar-muted-foreground"
+              data-testid="sidebar-archived-projects"
+            >
+              <summary>已屏蔽项目</summary>
+              {projectGroups
+                .filter((group) => group.archived)
+                .map((group) => (
+                  <div key={group.projectKey} className="flex items-center gap-2 py-1">
+                    <span className="truncate">{group.displayName}</span>
+                    <button
+                      type="button"
+                      disabled={!canPinProject(group)}
+                      onClick={() => archiveProject(group)}
+                      className="ml-auto"
+                    >
+                      恢复
+                    </button>
+                  </div>
+                ))}
+            </details>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
       <SidebarChromeFooter />
     </SidebarFolderDrop>
