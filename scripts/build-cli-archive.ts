@@ -591,6 +591,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   readonly outputDir: string;
   readonly resourceMonitorDir: Option.Option<string>;
   readonly notarySubmissionFile: Option.Option<string>;
+  readonly skipLibatomic: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -646,7 +647,14 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
 
   const executablePath = path.join(contentDir, executableName);
   if (input.platform === "linux") {
-    yield* bundleLinuxLibatomic({ repoRoot, contentDir, executablePath });
+    if (input.skipLibatomic) {
+      // 交叉构建时本机没有 ldd/dpkg-query/patchelf，只能跳过；产物要求目标机自带 libatomic1。
+      yield* Effect.logWarning(
+        "[cli-archive] Skipped libatomic bundling: the target host must provide libatomic1 itself.",
+      );
+    } else {
+      yield* bundleLinuxLibatomic({ repoRoot, contentDir, executablePath });
+    }
   }
   // TEMPORARY one-time Node fix. Remove when fixed: https://github.com/nodejs/node/issues/67048
   if (input.platform === "linux" && input.arch === "arm64") {
@@ -695,7 +703,7 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     // npm rejects Linux hardlink entries; macOS pnpm clones and bsdtar lacks this flag.
     yield* runCommand(
       ChildProcess.make("tar", [
-        ...(input.platform === "linux" ? ["--hard-dereference"] : []),
+        ...(input.platform === "linux" && hostPlatform !== "darwin" ? ["--hard-dereference"] : []),
         "-czf",
         archivePath,
         "-C",
@@ -730,6 +738,12 @@ const command = Command.make(
         "macOS: submit for notarization without waiting and write the submission id here. Publish only after await-notarization succeeds.",
       ),
       Flag.optional,
+    ),
+    skipLibatomic: Flag.Boolean("skip-libatomic").pipe(
+      Flag.withDescription(
+        "linux: do not bundle libatomic.so.1. Required when cross-building off a Linux host; the target must have libatomic1 installed.",
+      ),
+      Flag.withDefault(false),
     ),
   },
   (input) => buildCliArchive(input).pipe(Effect.scoped),
