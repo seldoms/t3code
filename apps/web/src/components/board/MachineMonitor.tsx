@@ -2,12 +2,50 @@ import { useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import type { MachineColor } from "../../environmentColors";
 import { EnvironmentColorDot } from "../EnvironmentColorDot";
-import { machineConnectionLabel, type MonitoredMachine } from "./machineMonitor.logic";
+import {
+  batterySensor,
+  gpuNeedsAttention,
+  hottestSensor,
+  latencyLevel,
+  loadLevel,
+  machineConnectionLabel,
+  monitorAlert,
+  temperatureLevel,
+  type MonitoredMachine,
+  type MonitorLevel,
+} from "./machineMonitor.logic";
 
-export type MonitorMetric = "cpu" | "memory" | "disk" | "network" | "latency";
+export type MonitorMetric =
+  | "cpu"
+  | "memory"
+  | "disk"
+  | "gpu"
+  | "network"
+  | "latency"
+  | "temperature";
 
-const loadColor = (value: number) =>
-  value >= 90 ? "bg-error" : value >= 75 ? "bg-warning" : "bg-success";
+/** 状态文字策略：默认只在异常时出现，数据在刷新就说明连着，不必常驻「已连接」。 */
+export type MonitorStatusText = "auto" | "always" | "never";
+export type MonitorStyle = "bars" | "dots";
+
+const LEVEL_BAR: Record<MonitorLevel, string> = {
+  ok: "bg-success",
+  warn: "bg-warning",
+  bad: "bg-error",
+  unknown: "bg-muted-foreground/40",
+};
+const LEVEL_TEXT: Record<MonitorLevel, string> = {
+  ok: "text-muted-foreground",
+  warn: "text-warning",
+  bad: "text-error",
+  unknown: "text-muted-foreground",
+};
+const LEVEL_LABEL: Record<MonitorLevel, string> = {
+  ok: "正常",
+  warn: "偏高",
+  bad: "过高",
+  unknown: "未获取",
+};
 
 const formatBytesPerSecond = (value: number) => {
   if (value >= 1_048_576) return `${(value / 1_048_576).toFixed(1)} MB/s`;
@@ -15,7 +53,15 @@ const formatBytesPerSecond = (value: number) => {
   return `${value} B/s`;
 };
 
-function LoadMeter({ label, value, text }: { label: string; value: number | null; text: string }) {
+interface MeterProps {
+  readonly label: string;
+  readonly value: number | null;
+  readonly text: string;
+  readonly level: MonitorLevel;
+  readonly cores?: readonly number[];
+}
+
+function LoadMeter({ label, value, text, level }: MeterProps) {
   return (
     <div className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_4rem] items-center gap-2 text-2xs">
       <span className="text-muted-foreground">{label}</span>
@@ -30,12 +76,48 @@ function LoadMeter({ label, value, text }: { label: string; value: number | null
       >
         {value !== null ? (
           <div
-            className={`h-full rounded-full ${loadColor(value)}`}
+            className={`h-full rounded-full ${LEVEL_BAR[level]}`}
             style={{ width: `${value}%` }}
           />
         ) : null}
       </div>
-      <span className="text-right tabular-nums text-muted-foreground">{text}</span>
+      <span className={`text-right tabular-nums ${LEVEL_TEXT[level]}`}>{text}</span>
+    </div>
+  );
+}
+
+/**
+ * 点阵视图：CPU 一格一个真实核心（拿到每核占用才这么画），
+ * 其余指标用固定格数表达百分比，不假装自己有逐核数据。
+ */
+function DotMeter({ label, value, text, level, cores }: MeterProps) {
+  const segments = cores && cores.length > 0 ? cores.length : 20;
+  const filled = value === null ? 0 : Math.round((value / 100) * segments);
+  return (
+    <div className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_4rem] items-center gap-2 text-2xs">
+      <span className="text-muted-foreground">{label}</span>
+      <div
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={value ?? undefined}
+        aria-valuetext={text}
+        className="flex min-w-0 flex-wrap items-center gap-0.5"
+      >
+        {Array.from({ length: segments }, (_, index) => {
+          const coreValue = cores?.[index];
+          const on = coreValue !== undefined ? coreValue > 0 : index < filled;
+          const segmentLevel = coreValue !== undefined ? loadLevel(coreValue) : level;
+          return (
+            <span
+              key={index}
+              className={`size-1.25 rounded-xs ${on ? LEVEL_BAR[segmentLevel] : "bg-muted"}`}
+            />
+          );
+        })}
+      </div>
+      <span className={`text-right tabular-nums ${LEVEL_TEXT[level]}`}>{text}</span>
     </div>
   );
 }
@@ -43,84 +125,145 @@ function LoadMeter({ label, value, text }: { label: string; value: number | null
 interface MetricRow {
   readonly key: MonitorMetric;
   readonly label: string;
-  /** 0–100 的进度条值；null 只显示文字。 */
+  /** 0–100 的进度值；null 只显示文字。 */
   readonly percent: number | null;
   readonly text: string;
+  readonly level: MonitorLevel;
+  readonly cores?: readonly number[];
+  readonly ariaLabel?: string;
 }
 
 function metricRows(
   machine: MonitoredMachine,
   metrics: ReadonlyArray<MonitorMetric>,
-): Array<MetricRow | null> {
-  return metrics.map((metric) => {
+): Array<MetricRow> {
+  const rows: Array<MetricRow> = [];
+  const percentText = (value: number | null) => (value === null ? "未知" : `${value}%`);
+  for (const metric of metrics) {
     switch (metric) {
       case "cpu":
-        return {
+        rows.push({
           key: metric,
           label: "CPU",
           percent: machine.cpu,
-          text: machine.cpu === null ? "未知" : `${machine.cpu}%`,
-        };
+          text: percentText(machine.cpu),
+          level: loadLevel(machine.cpu),
+          ...(machine.coreUtilization.length > 0 ? { cores: machine.coreUtilization } : {}),
+        });
+        break;
       case "memory":
-        return {
+        rows.push({
           key: metric,
           label: "内存",
           percent: machine.memory,
-          text: machine.memory === null ? "未知" : `${machine.memory}%`,
-        };
+          text: percentText(machine.memory),
+          level: loadLevel(machine.memory),
+        });
+        break;
       case "disk":
-        return {
+        rows.push({
           key: metric,
           label: "硬盘",
           percent: machine.disk,
-          text: machine.disk === null ? "未知" : `${machine.disk}%`,
-        };
+          text: percentText(machine.disk),
+          level: loadLevel(machine.disk),
+        });
+        break;
+      case "gpu":
+        // 没问题就不占版面：GPU 正常或读不到时整行消失。
+        if (!gpuNeedsAttention(machine)) break;
+        rows.push({
+          key: metric,
+          label: "GPU",
+          percent: machine.gpu,
+          text:
+            machine.gpu !== null
+              ? `${machine.gpu}%`
+              : machine.gpuMemoryPercent !== null
+                ? `显存 ${machine.gpuMemoryPercent}%`
+                : "偏热",
+          level:
+            machine.gpu !== null && machine.gpu >= 75
+              ? loadLevel(machine.gpu)
+              : machine.gpuMemoryPercent !== null && machine.gpuMemoryPercent >= 90
+                ? loadLevel(machine.gpuMemoryPercent)
+                : temperatureLevel(machine.sensors.find((sensor) => sensor.kind === "gpu") ?? null),
+          ...(machine.gpuName ? { ariaLabel: `GPU ${machine.gpuName}` } : {}),
+        });
+        break;
       case "network":
-        return machine.netRx === null && machine.netTx === null
-          ? null
-          : {
-              key: metric,
-              label: "网络",
-              percent: null,
-              text: `↓${machine.netRx === null ? "?" : formatBytesPerSecond(machine.netRx)} ↑${machine.netTx === null ? "?" : formatBytesPerSecond(machine.netTx)}`,
-            };
+        if (machine.netRx === null && machine.netTx === null) break;
+        rows.push({
+          key: metric,
+          label: "网络",
+          percent: null,
+          text: `↓${machine.netRx === null ? "?" : formatBytesPerSecond(machine.netRx)} ↑${machine.netTx === null ? "?" : formatBytesPerSecond(machine.netTx)}`,
+          level: "ok",
+        });
+        break;
       case "latency":
-        return machine.latencyMs === null
-          ? null
-          : { key: metric, label: "延迟", percent: null, text: `${machine.latencyMs} ms` };
+        if (machine.latencyMs === null) break;
+        rows.push({
+          key: metric,
+          label: "延迟",
+          percent: null,
+          text: `${machine.latencyMs} ms`,
+          level: latencyLevel(machine.latencyMs),
+        });
+        break;
+      case "temperature": {
+        const hottest = hottestSensor(machine.sensors);
+        if (hottest !== null)
+          rows.push({
+            key: metric,
+            label: "温度",
+            percent: null,
+            text: `${hottest.celsius}°C`,
+            level: temperatureLevel(hottest),
+            ariaLabel: `温度 ${hottest.label}`,
+          });
+        const battery = batterySensor(machine.sensors);
+        if (battery !== null)
+          rows.push({
+            key: "temperature",
+            label: "电池",
+            percent: null,
+            text: `${battery.celsius}°C`,
+            level: temperatureLevel(battery),
+            ariaLabel: `电池温度 ${battery.label}`,
+          });
+        break;
+      }
     }
-  });
+  }
+  return rows;
 }
 
-type DotLevel = "ok" | "warn" | "bad" | "unknown";
-
 function statusDots(machine: MonitoredMachine, metrics: ReadonlyArray<MonitorMetric>) {
-  const dot = (level: DotLevel, label: string) => (
+  const dot = (level: MonitorLevel, label: string) => (
     <span
-      aria-label={`${label} ${level === "ok" ? "正常" : level === "warn" ? "偏高" : level === "bad" ? "过高" : "未获取"}`}
-      className={`inline-block size-1.5 rounded-full ${
-        level === "ok"
-          ? "bg-success"
-          : level === "warn"
-            ? "bg-warning"
-            : level === "bad"
-              ? "bg-error"
-              : "bg-muted-foreground/40"
-      }`}
+      aria-label={`${label} ${LEVEL_LABEL[level]}`}
+      className={`inline-block size-1.5 rounded-full ${LEVEL_BAR[level]}`}
     />
   );
-  const level = (value: number | null): DotLevel =>
-    value === null ? "unknown" : value >= 90 ? "bad" : value >= 75 ? "warn" : "ok";
+  const battery = batterySensor(machine.sensors);
   return (
     <span className="flex shrink-0 items-center gap-0.5">
-      {metrics.includes("cpu") ? dot(level(machine.cpu), "CPU") : null}
-      {metrics.includes("memory") ? dot(level(machine.memory), "内存") : null}
-      {metrics.includes("disk") ? dot(level(machine.disk), "硬盘") : null}
+      {metrics.includes("cpu") ? dot(loadLevel(machine.cpu), "CPU") : null}
+      {metrics.includes("memory") ? dot(loadLevel(machine.memory), "内存") : null}
+      {metrics.includes("disk") ? dot(loadLevel(machine.disk), "硬盘") : null}
+      {metrics.includes("gpu") && gpuNeedsAttention(machine)
+        ? dot(loadLevel(machine.gpu ?? machine.gpuMemoryPercent), "GPU")
+        : null}
       {metrics.includes("network") && (machine.netRx !== null || machine.netTx !== null)
         ? dot("ok", "网络")
         : null}
       {metrics.includes("latency") && machine.latencyMs !== null
-        ? dot(machine.latencyMs > 1000 ? "warn" : "ok", "延迟")
+        ? dot(latencyLevel(machine.latencyMs), "延迟")
+        : null}
+      {metrics.includes("temperature") &&
+      (hottestSensor(machine.sensors) !== null || battery !== null)
+        ? dot(temperatureLevel(hottestSensor(machine.sensors) ?? battery), "温度")
         : null}
     </span>
   );
@@ -131,12 +274,16 @@ function MachineRow({
   color,
   single,
   metrics,
+  meterStyle,
+  statusText,
   onProjects,
   selected,
   compact,
 }: {
   compact: boolean;
   metrics: ReadonlyArray<MonitorMetric>;
+  meterStyle: MonitorStyle;
+  statusText: MonitorStatusText;
   selected: boolean;
   machine: MonitoredMachine;
   color: MachineColor;
@@ -146,8 +293,15 @@ function MachineRow({
   const [override, setOverride] = useState<boolean | null>(null);
   // Changing from one machine to many returns to the compact overview automatically.
   const open = single ? override !== false : override === true;
-  const label = machineConnectionLabel(machine);
-  const rows = metricRows(machine, metrics).flatMap((row) => (row ? [row] : []));
+  const alert = monitorAlert(machine);
+  const status =
+    statusText === "never"
+      ? null
+      : statusText === "always"
+        ? machineConnectionLabel(machine)
+        : alert;
+  const rows = metricRows(machine, metrics);
+  const Meter = meterStyle === "dots" ? DotMeter : LoadMeter;
   return (
     <div
       className="min-w-0 border-t border-border/60 first:border-t-0"
@@ -175,7 +329,9 @@ function MachineRow({
             <>
               {statusDots(machine, metrics)}
               {metrics.includes("latency") && machine.latencyMs !== null ? (
-                <span className="shrink-0 text-3xs tabular-nums text-muted-foreground">
+                <span
+                  className={`shrink-0 text-3xs tabular-nums ${LEVEL_TEXT[latencyLevel(machine.latencyMs)]}`}
+                >
                   {machine.latencyMs}ms
                 </span>
               ) : null}
@@ -196,30 +352,42 @@ function MachineRow({
       </div>
       {open ? (
         <div className="space-y-1.5 px-1 pb-2">
-          <p
-            className={`text-3xs ${machine.reachable === false || machine.stale ? "text-warning" : "text-muted-foreground"}`}
+          {status !== null ? (
+            <p className={`text-3xs ${alert !== null ? "text-warning" : "text-muted-foreground"}`}>
+              {status}
+            </p>
+          ) : null}
+          {/* 指标可以一直加，但不能把侧栏撑爆：超出高度自己滚，不抢主滚动区。 */}
+          <div
+            className="max-h-44 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5"
+            data-testid="machine-monitor-metrics"
           >
-            {label}
-            {machine.sampledAt !== null
-              ? ` · ${machine.stale ? "旧快照" : "采样"} ${new Date(machine.sampledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
-              : ""}
-          </p>
-          {rows.map((row) =>
-            row.percent === null ? (
-              <div
-                key={row.key}
-                className="flex items-center justify-between text-2xs tabular-nums"
-              >
-                <span className="text-muted-foreground">{row.label}</span>
-                <span>{row.text}</span>
-              </div>
-            ) : (
-              <LoadMeter key={row.key} label={row.label} value={row.percent} text={row.text} />
-            ),
-          )}
+            {rows.map((row) =>
+              row.percent === null ? (
+                <div
+                  key={`${row.key}:${row.label}`}
+                  className="flex items-center justify-between text-2xs tabular-nums"
+                >
+                  <span className="text-muted-foreground" aria-label={row.ariaLabel}>
+                    {row.label}
+                  </span>
+                  <span className={LEVEL_TEXT[row.level]}>{row.text}</span>
+                </div>
+              ) : (
+                <Meter
+                  key={`${row.key}:${row.label}`}
+                  label={row.label}
+                  value={row.percent}
+                  text={row.text}
+                  level={row.level}
+                  {...(row.cores ? { cores: row.cores } : {})}
+                />
+              ),
+            )}
+          </div>
           {machine.stale && !compact ? (
             <p className="text-3xs text-warning">
-              指标更新失败或已过期，下方不是实时数据；连接恢复后将自动重试。
+              指标更新失败或已过期，上方不是实时数据；连接恢复后将自动重试。
             </p>
           ) : null}
           {!compact && machine.cpu === null && machine.reachable ? (
@@ -237,12 +405,16 @@ export function MachineMonitor({
   machines,
   colorFor,
   metrics = ["cpu", "memory", "disk"],
+  meterStyle = "bars",
+  statusText = "auto",
   onProjects,
   selectedHostKey = null,
   compact = false,
 }: {
   compact?: boolean;
   metrics?: ReadonlyArray<MonitorMetric>;
+  meterStyle?: MonitorStyle;
+  statusText?: MonitorStatusText;
   selectedHostKey?: string | null;
   machines: ReadonlyArray<MonitoredMachine>;
   colorFor: (machine: MonitoredMachine) => MachineColor;
@@ -271,6 +443,8 @@ export function MachineMonitor({
           color={colorFor(machine)}
           single={machines.length === 1}
           metrics={metrics}
+          meterStyle={meterStyle}
+          statusText={statusText}
           onProjects={onProjects}
           selected={selectedHostKey === machine.key}
           compact={compact}

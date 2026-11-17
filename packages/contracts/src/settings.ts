@@ -596,10 +596,24 @@ export const ClientSettingsSchema = Schema.Struct({
   hiddenMonitorMachines: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
-  /** 侧栏机器行显示哪些基础指标；全部关掉只剩名字与状态色点。 */
+  /** 侧栏机器行显示哪些基础指标；全部关掉只剩名字与状态色点。GPU 只在异常时出现。 */
   monitorSidebarMetrics: Schema.Array(
-    Schema.Literals(["cpu", "memory", "disk", "network", "latency"]),
+    Schema.Literals(["cpu", "memory", "disk", "gpu", "network", "latency", "temperature"]),
   ).pipe(Schema.withDecodingDefault(Effect.succeed(["cpu", "memory", "disk"]))),
+  /** 状态文字：auto 只在异常时出现（数据在刷新就说明连着），always 常驻，never 不显示。 */
+  monitorStatusText: Schema.Literals(["auto", "always", "never"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("auto" as const)),
+  ),
+  /** 侧栏指标样式：进度条或点阵（点阵下 CPU 一格一个真实核心）。 */
+  monitorStyle: Schema.Literals(["bars", "dots"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("bars" as const)),
+  ),
+  /** 桌面小组件：独立浮窗，关掉主窗口也能看机器负载。 */
+  monitorWidgetEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  monitorWidgetPinned: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  monitorWidgetStyle: Schema.Literals(["bars", "dots"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("dots" as const)),
+  ),
   boardSidebarDirs: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardSidebarMachineLoad: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   boardDefaultView: Schema.Literals(["board", "table"]).pipe(
@@ -2163,8 +2177,15 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   hiddenMonitorMachines: Schema.optionalKey(Schema.Array(Schema.String)),
   monitorSidebarMetrics: Schema.optionalKey(
-    Schema.Array(Schema.Literals(["cpu", "memory", "disk", "network", "latency"])),
+    Schema.Array(
+      Schema.Literals(["cpu", "memory", "disk", "gpu", "network", "latency", "temperature"]),
+    ),
   ),
+  monitorStatusText: Schema.optionalKey(Schema.Literals(["auto", "always", "never"])),
+  monitorStyle: Schema.optionalKey(Schema.Literals(["bars", "dots"])),
+  monitorWidgetEnabled: Schema.optionalKey(Schema.Boolean),
+  monitorWidgetPinned: Schema.optionalKey(Schema.Boolean),
+  monitorWidgetStyle: Schema.optionalKey(Schema.Literals(["bars", "dots"])),
   boardSidebarDirs: Schema.optionalKey(Schema.Boolean),
   boardSidebarMachineLoad: Schema.optionalKey(Schema.Boolean),
   boardDefaultView: Schema.optionalKey(Schema.Literals(["board", "table"])),

@@ -8,8 +8,27 @@ const SIDEBAR_METRIC_ROWS = [
   { key: "cpu", title: "CPU", description: "处理器占用百分比与状态色点。" },
   { key: "memory", title: "内存", description: "内存占用百分比与状态色点。" },
   { key: "disk", title: "硬盘", description: "根分区占用百分比与状态色点。" },
-  { key: "network", title: "网络", description: "下行/上行速率；远程主机由 SSH 探针测得。" },
-  { key: "latency", title: "延迟", description: "SSH 探针往返耗时；本机不显示。" },
+  {
+    key: "gpu",
+    title: "GPU（仅异常时）",
+    description: "利用率≥75%、显存≥90% 或 GPU 温度≥80°C 才出现；正常或读不到就不占版面。",
+  },
+  {
+    key: "network",
+    title: "网络",
+    description: "下行/上行速率；本机由累计计数器差分，远程主机由 SSH 探针测得。",
+  },
+  {
+    key: "latency",
+    title: "延迟",
+    description: "SSH 探针往返耗时；≥200ms 黄、≥1s 红。本机不显示。",
+  },
+  {
+    key: "temperature",
+    title: "温度",
+    description:
+      "Linux 读热区与显卡温度（≥80°C 黄、≥90°C 红）；macOS 只能拿到电池温度（≥40°C 黄、≥45°C 红），CPU/GPU 芯片温度需 sudo 或第三方驱动，本应用不碰。",
+  },
 ] as const;
 
 /** 项目板与侧边栏的展示偏好（本机保存，不参与项目级覆盖）。 */
@@ -57,6 +76,56 @@ export function BoardSettingsPanel() {
                 <SelectItem value="local">仅本机</SelectItem>
                 <SelectItem value="environments">本机和 T3 环境</SelectItem>
                 <SelectItem value="all">全部可监控主机</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          devicePreference
+          title="状态文字"
+          description="默认只在异常时提示（旧快照、未连接、指标未获取）。数据在刷新就说明连着，不必常驻「已连接」；采样时间戳一律不显示。"
+          control={
+            <Select
+              value={settings.monitorStatusText}
+              onValueChange={(value) => {
+                if (value === "auto" || value === "always" || value === "never")
+                  update({ monitorStatusText: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="监控状态文字">
+                <SelectValue>
+                  {
+                    { auto: "仅异常时", always: "始终显示", never: "不显示" }[
+                      settings.monitorStatusText
+                    ]
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="auto">仅异常时</SelectItem>
+                <SelectItem value="always">始终显示</SelectItem>
+                <SelectItem value="never">不显示</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          devicePreference
+          title="指标样式"
+          description="点阵风格下 CPU 一格一个真实核心（拿到逐核占用才这么画），其余指标用固定格数表达百分比。"
+          control={
+            <Select
+              value={settings.monitorStyle}
+              onValueChange={(value) => {
+                if (value === "bars" || value === "dots") update({ monitorStyle: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="侧栏指标样式">
+                <SelectValue>{settings.monitorStyle === "bars" ? "进度条" : "点阵"}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="bars">进度条</SelectItem>
+                <SelectItem value="dots">点阵</SelectItem>
               </SelectPopup>
             </Select>
           }
@@ -112,6 +181,58 @@ export function BoardSettingsPanel() {
             }
           />
         ))}
+      </SettingsSection>
+      <SettingsSection title="桌面小组件">
+        <SettingsRow
+          devicePreference
+          title="在桌面上显示机器监控"
+          description="独立无边框浮窗，不占任务栏；关掉主窗口也能看。需要桌面客户端，浏览器里无效。系统自带小组件（WidgetKit）最快只能分钟级刷新，做不了实时监控，所以用浮窗。"
+          control={
+            <Switch
+              checked={settings.monitorWidgetEnabled}
+              aria-label="开启桌面监控小组件"
+              onCheckedChange={(checked) => update({ monitorWidgetEnabled: checked })}
+            />
+          }
+        />
+        <SettingsRow
+          devicePreference
+          title="小组件置顶"
+          description="浮在普通窗口之上并跟随所有桌面；关掉后可被其他窗口遮住。"
+          control={
+            <Switch
+              checked={settings.monitorWidgetPinned}
+              aria-label="小组件置顶"
+              onCheckedChange={(checked) => update({ monitorWidgetPinned: checked })}
+            />
+          }
+        />
+        <SettingsRow
+          devicePreference
+          title="小组件样式"
+          description="点阵：逐核 CPU 点阵 + 环形仪表 + 等宽数字；进度条：更紧凑的条形读数。"
+          control={
+            <Select
+              value={settings.monitorWidgetStyle}
+              onValueChange={(value) => {
+                if (value === "bars" || value === "dots") update({ monitorWidgetStyle: value });
+              }}
+            >
+              <SelectTrigger size="sm" aria-label="小组件样式">
+                <SelectValue>
+                  {settings.monitorWidgetStyle === "dots" ? "点阵" : "进度条"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                <SelectItem value="dots">点阵</SelectItem>
+                <SelectItem value="bars">进度条</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <p className="px-3 py-2 text-xs text-muted-foreground">
+          小组件显示哪些机器，跟上方「监控显示范围」与主机开关一致；拖顶部标题栏移动，位置下次启动自动恢复。
+        </p>
       </SettingsSection>
       <SettingsSection title="侧边栏">
         <SettingsRow

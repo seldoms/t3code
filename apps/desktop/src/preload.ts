@@ -1,5 +1,6 @@
 import type {
   DesktopBridge,
+  DesktopMonitorWidgetBounds,
   DesktopPreviewAnnotationVoiceEvent,
   DesktopPreviewFindResultEvent,
   DesktopPreviewOpenLinkEvent,
@@ -134,6 +135,18 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return () => ipcRenderer.removeListener(IpcChannels.TRACKPAD_SCROLL_END_CHANNEL, handler);
   },
   revealWindow: () => ipcRenderer.invoke(IpcChannels.REVEAL_WINDOW_CHANNEL),
+  monitorWidget: {
+    setOpen: (open) => ipcRenderer.invoke(IpcChannels.MONITOR_WIDGET_SET_OPEN_CHANNEL, open),
+    setPinned: (pinned) =>
+      ipcRenderer.invoke(IpcChannels.MONITOR_WIDGET_SET_PINNED_CHANNEL, pinned),
+    setBounds: (bounds) =>
+      ipcRenderer.invoke(IpcChannels.MONITOR_WIDGET_SET_BOUNDS_CHANNEL, bounds),
+    onBounds: (listener) => {
+      const handler = (_event: unknown, bounds: DesktopMonitorWidgetBounds) => listener(bounds);
+      ipcRenderer.on(IpcChannels.MONITOR_WIDGET_BOUNDS_CHANNEL, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.MONITOR_WIDGET_BOUNDS_CHANNEL, handler);
+    },
+  },
   getPrimaryPasteEnabled: () => primaryPasteEnabled,
   getSystemLocale: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL);

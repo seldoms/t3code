@@ -28,6 +28,7 @@ import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstall
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
+import { MonitorWidgetCoordinator } from "../components/desktop/MonitorWidgetCoordinator";
 import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkCoordinator";
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
@@ -98,7 +99,9 @@ export const Route = createRootRoute({
       authGateState.status === "authenticated" &&
       getDesktopSnapShotBridge() &&
       shouldResumeSnapShotSetupOnStartup() &&
-      location.pathname !== "/settings/snap-shot"
+      location.pathname !== "/settings/snap-shot" &&
+      // 小组件浮窗不能被开机引导动走，否则它会变成一个设置页。
+      location.pathname !== "/widget"
     ) {
       throw redirect({ to: "/settings/snap-shot", replace: true });
     }
@@ -160,7 +163,8 @@ function RootRouteBranch() {
     pathname === "/pair" ||
     pathname === "/connect" ||
     pathname === "/connect-agent" ||
-    pathname === "/approve-agent"
+    pathname === "/approve-agent" ||
+    pathname === "/widget"
   ) {
     return <Outlet />;
   }
@@ -184,6 +188,7 @@ function RootRouteBranch() {
         <DesktopWebLinkCoordinator />
       ) : null}
       {isElectron ? <RunningThreadKeepAlive /> : null}
+      {isElectron ? <MonitorWidgetCoordinator /> : null}
       <RelayClientInstallDialog />
       <ConnectOnboardingDialog />
       <SshPasswordPromptDialog />

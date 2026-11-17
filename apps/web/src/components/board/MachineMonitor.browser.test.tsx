@@ -20,6 +20,25 @@ const local: MonitoredMachine = {
   latencyMs: null,
   sampledAt: 1_800_000_000_000,
   stale: false,
+  cores: 10,
+  coreUtilization: [40, 20, 10, 5, 0, 0, 0, 0, 0, 0],
+  cpuHistory: [10, 40, 18],
+  uptimeSeconds: 270_000,
+  memUsedBytes: 12_000_000_000,
+  memTotalBytes: 16_000_000_000,
+  diskUsedBytes: 400_000_000_000,
+  diskTotalBytes: 500_000_000_000,
+  diskRead: null,
+  diskWrite: null,
+  netRxTotal: 56_000_000_000,
+  netTxTotal: 9_000_000_000,
+  gpu: 12,
+  gpuName: "Apple M4",
+  gpuMemoryUsed: 1_700_000_000,
+  gpuMemoryTotal: null,
+  gpuMemoryPercent: null,
+  sensors: [{ label: "电池", kind: "battery", celsius: 32.5 }],
+  interfaces: [],
 };
 const remote: MonitoredMachine = {
   ...local,
@@ -85,4 +104,72 @@ it("expands a single machine, switches to one-row-per-host for multiple machines
     .element(screen.getByRole("progressbar", { name: "CPU", exact: true }))
     .toHaveAttribute("aria-valuenow", "40");
   expect(screen.container.textContent).not.toContain("旧快照");
+});
+
+const dotColor = () => "green" as const;
+
+it("stays silent while the machine is healthy and never prints a sampling timestamp", async () => {
+  await using screen = await render(<MachineMonitor machines={[local]} colorFor={dotColor} />);
+  // 只有一台机器时默认展开。
+  await expect.element(screen.getByLabelText("收起 Mac 负载")).toBeVisible();
+  expect(screen.container.textContent).not.toContain("已连接");
+  expect(screen.container.textContent).not.toContain("采样");
+  expect(screen.container.textContent).not.toContain("21:00");
+});
+
+it("still reports the connection state when the user asks for permanent status text", async () => {
+  await using screen = await render(
+    <MachineMonitor machines={[local]} colorFor={dotColor} statusText="always" />,
+  );
+  await expect.element(screen.getByText(/已连接/)).toBeVisible();
+});
+
+it("keeps the GPU row out of the way until the GPU is actually a problem", async () => {
+  const metrics = ["cpu", "memory", "disk", "gpu"] as const;
+  await using screen = await render(
+    <MachineMonitor machines={[local]} colorFor={dotColor} metrics={metrics} />,
+  );
+  await expect.element(screen.getByRole("progressbar", { name: "CPU", exact: true })).toBeVisible();
+  expect(screen.container.textContent).not.toContain("GPU");
+  await screen.rerender(
+    <MachineMonitor machines={[{ ...local, gpu: 92 }]} colorFor={dotColor} metrics={metrics} />,
+  );
+  await expect
+    .element(screen.getByRole("progressbar", { name: "GPU", exact: true }))
+    .toHaveAttribute("aria-valuenow", "92");
+});
+
+it("scrolls the expanded metrics and highlights hot latency and temperatures", async () => {
+  const hot: MonitoredMachine = {
+    ...remote,
+    disk: 40,
+    latencyMs: 1_400,
+    sensors: [
+      { label: "x86_pkg_temp", kind: "cpu", celsius: 94 },
+      { label: "电池", kind: "battery", celsius: 46 },
+    ],
+  };
+  await using screen = await render(
+    <MachineMonitor
+      machines={[hot]}
+      colorFor={dotColor}
+      metrics={["cpu", "latency", "temperature"]}
+    />,
+  );
+  await expect
+    .element(screen.getByTestId("machine-monitor-metrics"))
+    .toHaveClass(/overflow-y-auto/);
+  const cpuTemperature = screen.getByText("94°C", { exact: true });
+  await expect.element(cpuTemperature).toHaveClass(/text-error/);
+  await expect.element(screen.getByText("46°C", { exact: true })).toHaveClass(/text-error/);
+  await expect.element(screen.getByText("1400 ms", { exact: true })).toHaveClass(/text-error/);
+});
+
+it("draws one dot per real core in the dot style", async () => {
+  await using screen = await render(
+    <MachineMonitor machines={[local]} colorFor={dotColor} meterStyle="dots" />,
+  );
+  const cpu = screen.getByRole("progressbar", { name: "CPU", exact: true });
+  await expect.element(cpu).toBeVisible();
+  expect(cpu.element().querySelectorAll("span").length).toBe(local.coreUtilization.length);
 });

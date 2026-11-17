@@ -1056,6 +1056,14 @@ export type DesktopMediaRead = typeof DesktopMediaReadSchema.Type;
 export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
+export const DesktopMonitorWidgetBoundsSchema = Schema.Struct({
+  x: Schema.Int,
+  y: Schema.Int,
+  width: Schema.Int.check(Schema.isGreaterThanOrEqualTo(240)),
+  height: Schema.Int.check(Schema.isGreaterThanOrEqualTo(160)),
+});
+export type DesktopMonitorWidgetBounds = typeof DesktopMonitorWidgetBoundsSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getRelayTelemetryEnabled: () => boolean;
@@ -1071,6 +1079,16 @@ export interface DesktopBridge {
    * only the main process can spend a notification click's activation token.
    */
   revealWindow: () => Promise<void>;
+  /**
+   * 桌面机器小组件：独立无边框浮窗，不占任务栏。位置由渲染进程保在
+   * localStorage，主进程只负责开窗与上报拖动结果，不进桌面设置文件。
+   */
+  monitorWidget?: {
+    setOpen: (open: boolean) => Promise<void>;
+    setPinned: (pinned: boolean) => Promise<void>;
+    setBounds: (bounds: DesktopMonitorWidgetBounds) => Promise<void>;
+    onBounds: (listener: (bounds: DesktopMonitorWidgetBounds) => void) => () => void;
+  };
   /**
    * The OS locale as a BCP-47 tag, which the renderer cannot read for itself:
    * the packaged app ships only the `en-US` Chromium locale pak, so

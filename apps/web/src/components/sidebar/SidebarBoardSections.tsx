@@ -12,8 +12,10 @@ const MONITOR_METRICS: ReadonlyArray<MonitorMetric> = [
   "cpu",
   "memory",
   "disk",
+  "gpu",
   "network",
   "latency",
+  "temperature",
 ];
 
 export function SidebarBoardSections() {
@@ -70,6 +72,8 @@ export function SidebarBoardSections() {
           settings.monitorSidebarMetrics.includes(metric),
         )}
         machines={machines}
+        meterStyle={settings.monitorStyle}
+        statusText={settings.monitorStatusText}
         colorFor={(machine) =>
           machine.local
             ? "green"

@@ -22,7 +22,12 @@ const SSH_BIN = NodeFS.existsSync("/usr/bin/ssh") ? "/usr/bin/ssh" : "ssh";
 const CACHE_MS = 10_000;
 const SSH_TIMEOUT_MS = 5000;
 
-/** 一条命令拿齐需要的数字，远端只输出 KEY=VALUE。 */
+/**
+ * 一条命令拿齐需要的数字，远端只输出 KEY=VALUE。
+ * 前 6 行按位置解析（hostname/uname/cores/load/mem/disk），其余一律带前缀，
+ * 新增指标只能往后追加，不能插队。末尾必须 true：热力循环未命中时测试失败，
+ * 会把整条探针的退出码拖成非 0，execFile 直接 reject → 主机被误判离线。
+ */
 const PROBE = [
   "hostname",
   "uname -s",
@@ -31,10 +36,19 @@ const PROBE = [
   'cat /proc/meminfo 2>/dev/null | awk "/MemTotal/{t=\\$2}/MemAvailable/{a=\\$2}END{if(t>0)print t\\",\\"(t-a);else print \\"0,0\\"}" || echo "0,0"',
   `df -k / | tail -1 | awk '{print $2 "," $3 "," $4}'`,
   `grep "^cpu " /proc/stat 2>/dev/null | head -1`,
+  `grep -E "^cpu[0-9]+ " /proc/stat 2>/dev/null`,
   `awk '!/lo:/&&/:/{rx+=$2;tx+=$10}END{print "net",rx+0,tx+0}' /proc/net/dev 2>/dev/null`,
+  `awk '!/lo:/&&/:/{gsub(/:/,"",$1);print "iface",$1,$2,$10}' /proc/net/dev 2>/dev/null`,
   `if command -v python3 >/dev/null 2>&1; then python3 -c "import time;time.sleep(0.2)"; else sleep 1; fi`,
   `grep "^cpu " /proc/stat 2>/dev/null | head -1`,
+  `grep -E "^cpu[0-9]+ " /proc/stat 2>/dev/null`,
   `awk '!/lo:/&&/:/{rx+=$2;tx+=$10}END{print "net",rx+0,tx+0}' /proc/net/dev 2>/dev/null`,
+  `awk '!/lo:/&&/:/{gsub(/:/,"",$1);print "iface",$1,$2,$10}' /proc/net/dev 2>/dev/null`,
+  // GPU 与温度只支持 Linux 远端：/sys/class/thermal 不需要 lm-sensors，nvidia-smi 没装就缺省。
+  `if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | sed "s/^/gpu /"; fi`,
+  `for z in /sys/class/thermal/thermal_zone*; do [ -r "$z/temp" ] && echo "sensor $(cat $z/type 2>/dev/null) $(cat $z/temp 2>/dev/null)"; done`,
+  `cut -d" " -f1 /proc/uptime 2>/dev/null | sed "s/^/uptime /"`,
+  "true",
 ].join("; ");
 
 export interface RemoteHostMetrics extends Omit<

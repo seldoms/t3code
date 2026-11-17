@@ -76,6 +76,11 @@ import * as PreviewIpc from "./methods/preview.ts";
 import * as AppActivationIpc from "./methods/appActivation.ts";
 import * as WebLinksIpc from "./methods/webLinks.ts";
 import {
+  setMonitorWidgetBounds,
+  setMonitorWidgetOpen,
+  setMonitorWidgetPinned,
+} from "./methods/monitorWidget.ts";
+import {
   completeLegacyLocalStorage,
   takeLegacyLocalStorage,
 } from "./methods/legacyLocalStorage.ts";
@@ -161,6 +166,9 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);
   yield* ipc.handle(revealWindow);
+  yield* ipc.handle(setMonitorWidgetOpen);
+  yield* ipc.handle(setMonitorWidgetPinned);
+  yield* ipc.handle(setMonitorWidgetBounds);
   yield* ipc.handle(syncHtmlFullscreen);
   yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getUpdateState);

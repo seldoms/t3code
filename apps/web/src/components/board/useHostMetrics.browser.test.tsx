@@ -39,3 +39,26 @@ it("retains a failed refresh as an old snapshot, recovers on the next poll and s
   await act(() => vi.advanceTimersByTimeAsync(10000));
   expect(request).toHaveBeenCalledTimes(calls);
 });
+
+it("shares one poll and one history across every consumer", async () => {
+  const request = vi.mocked(primaryRawFetch);
+  request.mockReset();
+  request.mockImplementation(async () => Response.json({ host: "mac", cpu: 20, sampledAt: 1000 }));
+  using _timers = fakeTimers();
+  await using screen = await render(
+    <>
+      <Snapshot />
+      <Snapshot />
+      <Snapshot />
+    </>,
+  );
+  await vi.waitFor(() => expect(screen.container.textContent).toContain('"cpu":20'));
+  const before = request.mock.calls.length;
+  await act(() => vi.advanceTimersByTimeAsync(2000));
+  // 三个界面共用一条 2s 链：以前是各起一条，开四个界面就四倍请求和四倍重渲染。
+  expect(request.mock.calls.length - before).toBe(1);
+  await screen.unmount();
+  const afterUnmount = request.mock.calls.length;
+  await act(() => vi.advanceTimersByTimeAsync(10000));
+  expect(request.mock.calls.length).toBe(afterUnmount);
+});
